@@ -168,6 +168,7 @@ struct vxlan_softc {
 	union vxlan_sockaddr		 vxl_src_addr;
 	union vxlan_sockaddr		 vxl_dst_addr;
 	uint32_t			 vxl_flags;
+	u_int				 vxl_fibnum;
 #define VXLAN_FLAG_INIT		0x0001
 #define VXLAN_FLAG_TEARDOWN	0x0002
 #define VXLAN_FLAG_LEARN	0x0004
@@ -2378,6 +2379,21 @@ vxlan_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		VXLAN_WUNLOCK(sc);
 		break;
 
+	case SIOCGTUNFIB:
+		error = 0;
+		ifr->ifr_fib = sc->vxl_fibnum;
+		break;
+
+	case SIOCSTUNFIB:
+		if ((error = priv_check(curthread, PRIV_NET_VXLAN)) != 0)
+			break;
+
+		if (ifr->ifr_fib >= rt_numfibs)
+			error = EINVAL;
+		else
+			sc->vxl_fibnum = ifr->ifr_fib;
+		break;
+
 	default:
 		error = ether_ioctl(ifp, cmd, data);
 		break;
@@ -2533,7 +2549,7 @@ vxlan_encap4(struct vxlan_softc *sc, const union vxlan_sockaddr *fvxlsa,
 		sin->sin_family = AF_INET;
 		sin->sin_len = sizeof(*sin);
 		sin->sin_addr = ip->ip_dst;
-		ro->ro_nh = fib4_lookup(RT_DEFAULT_FIB, ip->ip_dst, 0, NHR_NONE,
+		ro->ro_nh = fib4_lookup(M_GETFIB(m), ip->ip_dst, 0, NHR_NONE,
 		    0);
 		if (ro->ro_nh == NULL) {
 			m_freem(m);
@@ -2645,7 +2661,7 @@ vxlan_encap6(struct vxlan_softc *sc, const union vxlan_sockaddr *fvxlsa,
 		sin6->sin6_family = AF_INET6;
 		sin6->sin6_len = sizeof(*sin6);
 		sin6->sin6_addr = ip6->ip6_dst;
-		ro->ro_nh = fib6_lookup(RT_DEFAULT_FIB, &ip6->ip6_dst, 0,
+		ro->ro_nh = fib6_lookup(M_GETFIB(m), &ip6->ip6_dst, 0,
 		    NHR_NONE, 0);
 		if (ro->ro_nh == NULL) {
 			m_freem(m);
@@ -2737,6 +2753,8 @@ vxlan_transmit(struct ifnet *ifp, struct mbuf *m)
 	ipv4 = VXLAN_SOCKADDR_IS_IPV4(&vxlsa) != 0;
 	if (vxlan_sockaddr_in_multicast(&vxlsa) != 0)
 		mcifp = vxlan_multicast_if_ref(sc, ipv4);
+
+	M_SETFIB(m, sc->vxl_fibnum);
 
 	VXLAN_ACQUIRE(sc);
 	VXLAN_RUNLOCK(sc, &tracker);
@@ -3174,6 +3192,7 @@ vxlan_clone_create(struct if_clone *ifc, int unit, caddr_t params)
 
 	sc = malloc(sizeof(struct vxlan_softc), M_VXLAN, M_WAITOK | M_ZERO);
 	sc->vxl_unit = unit;
+	sc->vxl_fibnum = curthread->td_proc->p_fibnum;
 	vxlan_set_default_config(sc);
 	error = vxlan_stats_alloc(sc);
 	if (error != 0)
