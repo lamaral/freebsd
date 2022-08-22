@@ -54,6 +54,7 @@
 
 #include <net/if.h>
 #include <net/pfvar.h>
+#include <netinet/in.h>
 #include <netpfil/pf/pf.h>
 
 #define	PFSYNC_VERSION		5
@@ -235,16 +236,21 @@ struct pfsyncstats {
 	u_int64_t	pfsyncs_oacts[PFSYNC_ACT_MAX];
 };
 
+union pfsync_sockaddr {
+	struct sockaddr		sa;
+	struct sockaddr_in	in4;
+};
+
 /*
  * Configuration structure for SIOCSETPFSYNC SIOCGETPFSYNC
  */
 struct pfsyncreq {
-	char		 pfsyncr_syncdev[IFNAMSIZ];
-	struct in_addr	 pfsyncr_syncpeer;
-	int		 pfsyncr_maxupdates;
+	char			pfsyncr_syncdev[IFNAMSIZ];
+	union pfsync_sockaddr	pfsyncr_syncpeer;
+	int			pfsyncr_maxupdates;
 #define	PFSYNCF_OK		0x00000001
 #define	PFSYNCF_DEFER		0x00000002
-	int		 pfsyncr_defer;
+	int			pfsyncr_defer;
 };
 
 #define	SIOCSETPFSYNC   _IOW('i', 247, struct ifreq)

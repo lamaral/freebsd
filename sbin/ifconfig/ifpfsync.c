@@ -97,7 +97,7 @@ void
 setpfsync_syncpeer(const char *val, int d, int s, const struct afswtch *rafp)
 {
 	struct pfsyncreq preq;
-	struct addrinfo hints, *peerres;
+	struct addrinfo *peerres;
 	int ecode;
 
 	bzero((char *)&preq, sizeof(struct pfsyncreq));
@@ -106,19 +106,25 @@ setpfsync_syncpeer(const char *val, int d, int s, const struct afswtch *rafp)
 	if (ioctl(s, SIOCGETPFSYNC, (caddr_t)&ifr) == -1)
 		err(1, "SIOCGETPFSYNC");
 
-	memset(&hints, 0, sizeof(hints));
-	hints.ai_family = AF_INET;
-	hints.ai_socktype = SOCK_DGRAM;	/*dummy*/
-
-	if ((ecode = getaddrinfo(val, NULL, &hints, &peerres)) != 0)
+	if ((ecode = getaddrinfo(val, NULL, NULL, &peerres)) != 0)
 		errx(1, "error in parsing address string: %s",
 		    gai_strerror(ecode));
 
-	if (peerres->ai_addr->sa_family != AF_INET)
-		errx(1, "only IPv4 addresses supported for the syncpeer");
+	switch (peerres->ai_family) {
+#ifdef INET
+	case AF_INET: {
+		struct sockaddr_in *sin = (struct sockaddr_in *)peerres->ai_addr;
 
-	preq.pfsyncr_syncpeer.s_addr = ((struct sockaddr_in *)
-	    peerres->ai_addr)->sin_addr.s_addr;
+		if (IN_MULTICAST(ntohl(sin->sin_addr.s_addr)))
+			errx(1, "syncpeer address cannot be multicast");
+
+		preq.pfsyncr_syncpeer.in4 = *sin;
+		break;
+	}
+#endif
+	default:
+		errx(1, "syncpeer address %s not supported", val);
+	}
 
 	if (ioctl(s, SIOCSETPFSYNC, (caddr_t)&ifr) == -1)
 		err(1, "SIOCSETPFSYNC");
@@ -137,7 +143,16 @@ unsetpfsync_syncpeer(const char *val, int d, int s, const struct afswtch *rafp)
 	if (ioctl(s, SIOCGETPFSYNC, (caddr_t)&ifr) == -1)
 		err(1, "SIOCGETPFSYNC");
 
-	preq.pfsyncr_syncpeer.s_addr = 0;
+	switch (preq.pfsyncr_syncpeer.sa.sa_family) {
+#ifdef INET
+	case AF_INET:
+	{
+		memset((char *)&preq.pfsyncr_syncpeer, 0,
+		    sizeof(union pfsync_sockaddr));
+		break;
+	}
+#endif
+	}
 
 	if (ioctl(s, SIOCSETPFSYNC, (caddr_t)&ifr) == -1)
 		err(1, "SIOCSETPFSYNC");
@@ -187,24 +202,35 @@ void
 pfsync_status(int s)
 {
 	struct pfsyncreq preq;
+	char syncpeer[NI_MAXHOST];
+	struct sockaddr *syncpeer_sa;
+	int error;
 
 	bzero((char *)&preq, sizeof(struct pfsyncreq));
 	ifr.ifr_data = (caddr_t)&preq;
+	syncpeer_sa = &preq.pfsyncr_syncpeer.sa;
 
 	if (ioctl(s, SIOCGETPFSYNC, (caddr_t)&ifr) == -1)
 		return;
 
 	if (preq.pfsyncr_syncdev[0] != '\0' ||
-	    preq.pfsyncr_syncpeer.s_addr != htonl(INADDR_PFSYNC_GROUP))
-			printf("\t");
+	    syncpeer_sa->sa_family != AF_UNSPEC)
+		printf("\t");
 
 	if (preq.pfsyncr_syncdev[0] != '\0')
-		printf("pfsync: syncdev: %s ", preq.pfsyncr_syncdev);
-	if (preq.pfsyncr_syncpeer.s_addr != htonl(INADDR_PFSYNC_GROUP))
-		printf("syncpeer: %s ", inet_ntoa(preq.pfsyncr_syncpeer));
+		printf("syncdev: %s ", preq.pfsyncr_syncdev);
+
+	if (preq.pfsyncr_syncpeer.sa.sa_family != AF_UNSPEC &&
+	    preq.pfsyncr_syncpeer.in4.sin_addr.s_addr != htonl(INADDR_PFSYNC_GROUP)) {
+		if ((error = getnameinfo(syncpeer_sa, syncpeer_sa->sa_len,
+		    syncpeer, sizeof(syncpeer), NULL, 0, NI_NUMERICHOST)) != 0)
+			errx(1, "getnameinfo: %s", gai_strerror(error));
+		printf("syncpeer: %s ", syncpeer);
+	}
 
 	if (preq.pfsyncr_syncdev[0] != '\0' ||
-	    preq.pfsyncr_syncpeer.s_addr != htonl(INADDR_PFSYNC_GROUP)) {
+	    (preq.pfsyncr_syncpeer.sa.sa_family != AF_UNSPEC &&
+		preq.pfsyncr_syncpeer.in4.sin_addr.s_addr != htonl(INADDR_PFSYNC_GROUP))) {
 		printf("maxupd: %d ", preq.pfsyncr_maxupdates);
 		printf("defer: %s\n",
 		    (preq.pfsyncr_defer & PFSYNCF_DEFER) ? "on" : "off");
