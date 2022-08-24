@@ -75,6 +75,7 @@ __FBSDID("$FreeBSD$");
 #include <sys/mbuf.h>
 #include <sys/module.h>
 #include <sys/mutex.h>
+#include <sys/nv.h>
 #include <sys/priv.h>
 #include <sys/smp.h>
 #include <sys/socket.h>
@@ -90,6 +91,8 @@ __FBSDID("$FreeBSD$");
 #include <net/vnet.h>
 #include <net/pfvar.h>
 #include <net/if_pfsync.h>
+
+#include <netpfil/pf/pfsync_nv.h>
 
 #include <netinet/if_ether.h>
 #include <netinet/in.h>
@@ -1346,21 +1349,70 @@ pfsyncioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		ifp->if_mtu = ifr->ifr_mtu;
 		break;
 	case SIOCGETPFSYNC:
+		// XXX: Already changed to match the new softc struct
 		bzero(&pfsyncr, sizeof(pfsyncr));
 		PFSYNC_LOCK(sc);
 		if (sc->sc_sync_if) {
 			strlcpy(pfsyncr.pfsyncr_syncdev,
 			    sc->sc_sync_if->if_xname, IFNAMSIZ);
 		}
-		pfsyncr.pfsyncr_syncpeer = sc->sc_sync_peer;
+		pfsyncr.pfsyncr_syncpeer = sc->sc_sync_peer.in4.sin_addr;
 		pfsyncr.pfsyncr_maxupdates = sc->sc_maxupdates;
 		pfsyncr.pfsyncr_defer = sc->sc_flags;
 		PFSYNC_UNLOCK(sc);
 		return (copyout(&pfsyncr, ifr_data_get_ptr(ifr),
 		    sizeof(pfsyncr)));
 
+	case SIOCGETPFSYNCNV:
+		// XXX: This compiles fine now. Need to implement the
+		// ifconfig/ifpfsync.c part in order to evaluate if it is
+		// working correctly.
+	    {
+	    	printf("Top of SIOCGETPFSYNCNV");
+		nvlist_t *nvl = nvlist_create(0);
+
+		if (nvl == NULL)
+			return (ENOMEM);
+
+		nvlist_add_string(nvl, "syncdev", sc->sc_sync_if->if_xname);
+		// TODO: Add the syncpeer nv
+		nvlist_add_number(nvl, "maxupdates", sc->sc_maxupdates);
+		nvlist_add_number(nvl, "defer", sc->sc_flags);
+
+		void *packed = NULL;
+		size_t len;
+
+		MPASS(nvl != NULL);
+
+		packed = nvlist_pack(nvl, &len);
+		if (packed == NULL) {
+			error = nvlist_error(nvl);
+			if (error == 0)
+				error = EDOOFUS;
+			free(packed, M_NVLIST);
+			nvlist_destroy(nvl);
+			return error;
+		}
+
+		if (len > ifr->ifr_cap_nv.buf_length) {
+			ifr->ifr_cap_nv.length = len;
+			ifr->ifr_cap_nv.buffer = NULL;
+			return (EFBIG);
+		}
+
+		ifr->ifr_cap_nv.length = len;
+		error = copyout(packed, ifr->ifr_cap_nv.buffer, len);
+
+		free(packed, M_NVLIST);
+//		nvlist_destroy(nvl);
+		printf("Right before return error");
+		return error;
+	    }
+
 	case SIOCSETPFSYNC:
 	    {
+		// TODO: Add a compatibility layer to translate from the new
+		//  softc format to the required format for the old API
 		struct in_mfilter *imf = NULL;
 		struct ifnet *sifp;
 
@@ -1377,19 +1429,26 @@ pfsyncioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 			sifp = NULL;
 		else if ((sifp = ifunit_ref(pfsyncr.pfsyncr_syncdev)) == NULL)
 			return (EINVAL);
-		if (sifp != NULL && (sc->sc_sync_peer.sa.sa_family == AF_UNSPEC)) {
+
+		if (sifp != NULL && (
+		    pfsyncr.pfsyncr_syncpeer.s_addr == 0 ||
+		    pfsyncr.pfsyncr_syncpeer.s_addr ==
+		    htonl(INADDR_PFSYNC_GROUP)))
 			imf = ip_mfilter_alloc(M_WAITOK, 0, 0);
-		}
 
 		PFSYNC_LOCK(sc);
-		if (sifp != NULL && (sc->sc_sync_peer.sa.sa_family == AF_UNSPEC)) {
-			struct sockaddr_in peer_addr;
+		struct sockaddr_in peer_addr;
+		if (sifp != NULL &&
+		    (sc->sc_sync_peer.sa.sa_family == AF_UNSPEC)) {
 			peer_addr.sin_family = AF_INET;
 			peer_addr.sin_addr.s_addr = htonl(INADDR_PFSYNC_GROUP);
 			sc->sc_sync_peer.in4 = peer_addr;
-
-		} else
-			sc->sc_sync_peer = pfsyncr.pfsyncr_syncpeer;
+		} else {
+			peer_addr.sin_family = AF_INET;
+			peer_addr.sin_addr.s_addr =
+			    pfsyncr.pfsyncr_syncpeer.s_addr;
+			sc->sc_sync_peer.in4 = peer_addr;
+		}
 
 		sc->sc_maxupdates = pfsyncr.pfsyncr_maxupdates;
 		if (pfsyncr.pfsyncr_defer & PFSYNCF_DEFER) {
@@ -1422,7 +1481,8 @@ pfsyncioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 
 		pfsync_multicast_cleanup(sc);
 
-		if (sc->sc_sync_peer.in4.sin_addr.s_addr == htonl(INADDR_PFSYNC_GROUP)) {
+		if (sc->sc_sync_peer.in4.sin_addr.s_addr ==
+		    htonl(INADDR_PFSYNC_GROUP)) {
 			error = pfsync_multicast_setup(sc, sifp, imf);
 			if (error) {
 				if_rele(sifp);
@@ -1437,10 +1497,11 @@ pfsyncioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 
 		switch (sc->sc_sync_peer.sa.sa_family) {
 #ifdef INET
-		case AF_INET: {
+		case AF_INET:
+		    {
 			struct ip *ip;
 			ip = &sc->sc_template.ipv4;
-			memset(ip, 0, sizeof(*ip));
+			bzero(ip, sizeof(*ip));
 			ip->ip_v = IPVERSION;
 			ip->ip_hl = sizeof(sc->sc_template.ipv4) >> 2;
 			ip->ip_tos = IPTOS_LOWDELAY;
@@ -1451,11 +1512,9 @@ pfsyncioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 			ip->ip_src.s_addr = INADDR_ANY;
 			ip->ip_dst.s_addr =
 			    sc->sc_sync_peer.in4.sin_addr.s_addr;
-			break;
-		}
+		    }
 #endif
 		}
-
 		/* Request a full state table update. */
 		if ((sc->sc_flags & PFSYNCF_OK) && carp_demote_adj_p)
 			(*carp_demote_adj_p)(V_pfsync_carp_adj,
@@ -1474,6 +1533,24 @@ pfsyncioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		PFSYNC_BUNLOCK(sc);
 
 		break;
+	    }
+	case SIOCSETPFSYNCNV:
+	    {
+		    nvlist_t *nvl = (nvlist_t *)data;
+
+		    if (nvl == NULL)
+			    return (EINVAL);
+
+		    if (!nvlist_exists_string(nvl, "syncdev"))
+			    return (EINVAL);
+
+		    // TODO: Add the syncpeer nv
+
+		    if (!nvlist_exists_number(nvl, "maxupdates"))
+			    return (EINVAL);
+
+		    if (!nvlist_exists_number(nvl, "defer"))
+			    return (EINVAL);
 	    }
 	default:
 		return (ENOTTY);
@@ -1593,6 +1670,7 @@ pfsync_sendout(int schedswi, int c)
 	switch (sc->sc_sync_peer.sa.sa_family) {
 #ifdef INET
 	case AF_INET:
+	    {
 		struct ip *ip;
 
 		ip = mtod(m, struct ip *);
@@ -1602,6 +1680,7 @@ pfsync_sendout(int schedswi, int c)
 		ip->ip_len = htons(m->m_pkthdr.len);
 		ip_fillid(ip);
 		break;
+	    }
 #endif
 	default:
 		return;
