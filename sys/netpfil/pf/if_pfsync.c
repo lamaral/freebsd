@@ -75,6 +75,7 @@ __FBSDID("$FreeBSD$");
 #include <sys/mbuf.h>
 #include <sys/module.h>
 #include <sys/mutex.h>
+#include <sys/nv.h>
 #include <sys/priv.h>
 #include <sys/smp.h>
 #include <sys/socket.h>
@@ -1352,6 +1353,49 @@ pfsyncioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		return (copyout(&pfsyncr, ifr_data_get_ptr(ifr),
 		    sizeof(pfsyncr)));
 
+	case SIOCGETPFSYNCNV:
+	    // XXX: This compiles fine now. Need to implement the
+	    // ifconfig/ifpfsync.c part in order to evaluate if it is
+	    // working correctly.
+	    {
+		printf("Top of SIOCGETPFSYNCNV\n");
+		struct pfsyncioc_nv *nv = (struct pfsyncioc_nv *)data;
+
+		nvlist_t *nvl = nvlist_create(0);
+
+		if (nvl == NULL)
+			return (ENOMEM);
+
+		nvlist_add_string(nvl, "syncdev", sc->sc_sync_if->if_xname);
+		// TODO: Add the syncpeer nv
+		nvlist_add_number(nvl, "maxupdates", sc->sc_maxupdates);
+		nvlist_add_number(nvl, "flags", sc->sc_flags);
+
+		void *packed = NULL;
+
+		MPASS(nvl != NULL);
+
+		packed = nvlist_pack(nvl, &nv->len);
+		if (packed == NULL) {
+			error = nvlist_error(nvl);
+			if (error == 0)
+				error = EDOOFUS;
+			free(packed, M_NVLIST);
+			nvlist_destroy(nvl);
+			return error;
+		}
+
+		if (nv->size < nv->len) {
+			return (ENOSPC);
+		}
+
+		error = copyout(packed, nv->data, nv->len);
+
+		free(packed, M_NVLIST);
+		nvlist_destroy(nvl);
+		printf("Right before return error\n");
+		return error;
+	    }
 	case SIOCSETPFSYNC:
 	    {
 		struct in_mfilter *imf = NULL;

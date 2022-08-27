@@ -30,6 +30,7 @@
 
 #include <sys/param.h>
 #include <sys/ioctl.h>
+#include <sys/nv.h>
 #include <sys/socket.h>
 
 #include <net/if.h>
@@ -187,12 +188,44 @@ void
 pfsync_status(int s)
 {
 	struct pfsyncreq preq;
+	struct pfsyncioc_nv nv;
+	nvlist_t *nvl;
+	size_t nvlen;
+	void *data;
 
-	bzero((char *)&preq, sizeof(struct pfsyncreq));
-	ifr.ifr_data = (caddr_t)&preq;
+	nvl = nvlist_create(0);
+	data = nvlist_pack(nvl, &nvlen);
 
-	if (ioctl(s, SIOCGETPFSYNC, (caddr_t)&ifr) == -1)
-		return;
+	nv.data = malloc(40960);
+	memcpy(nv.data, data, nvlen);
+	free(data);
+
+	nv.len = nvlen;
+	nv.size = 40960;
+
+	printf("Before ioctl\n");
+	if (ioctl(s, SIOCGETPFSYNCNV, (caddr_t)&nv) == -1)
+//		return;
+		err(1, "SIOCGETPFSYNCNV");
+	printf("After ioctl\n");
+
+	nvlist_destroy(nvl);
+	nvl = NULL;
+
+	nvl = nvlist_unpack(nv.data, nv.len, 0);
+	if (nvl == NULL)
+		nvlist_destroy(nvl);
+	free(nv.data);
+	printf("fulapou\n");
+	return;
+
+	strlcpy(preq.pfsyncr_syncdev, nvlist_get_string(nvl, "syncdev"),
+	    IFNAMSIZ);
+	preq.pfsyncr_maxupdates = nvlist_get_number(nvl, "maxupdates");
+	preq.pfsyncr_defer = nvlist_get_number(nvl, "flags");
+
+	nvlist_destroy(nvl);
+	free(data);
 
 	if (preq.pfsyncr_syncdev[0] != '\0' ||
 	    preq.pfsyncr_syncpeer.s_addr != htonl(INADDR_PFSYNC_GROUP))
@@ -200,8 +233,8 @@ pfsync_status(int s)
 
 	if (preq.pfsyncr_syncdev[0] != '\0')
 		printf("pfsync: syncdev: %s ", preq.pfsyncr_syncdev);
-	if (preq.pfsyncr_syncpeer.s_addr != htonl(INADDR_PFSYNC_GROUP))
-		printf("syncpeer: %s ", inet_ntoa(preq.pfsyncr_syncpeer));
+//	if (preq.pfsyncr_syncpeer.s_addr != htonl(INADDR_PFSYNC_GROUP))
+//		printf("syncpeer: %s ", inet_ntoa(preq.pfsyncr_syncpeer));
 
 	if (preq.pfsyncr_syncdev[0] != '\0' ||
 	    preq.pfsyncr_syncpeer.s_addr != htonl(INADDR_PFSYNC_GROUP)) {
