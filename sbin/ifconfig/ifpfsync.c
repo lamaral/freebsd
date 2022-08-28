@@ -111,21 +111,21 @@ setpfsync_syncpeer(const char *val, int d, int s, const struct afswtch *rafp)
 		errx(1, "error in parsing address string: %s",
 		    gai_strerror(ecode));
 
-//	switch (peerres->ai_family) {
-//#ifdef INET
-//	case AF_INET: {
-//		struct sockaddr_in *sin = (struct sockaddr_in *)peerres->ai_addr;
-//
-//		if (IN_MULTICAST(ntohl(sin->sin_addr.s_addr)))
-//			errx(1, "syncpeer address cannot be multicast");
-//
-//		preq.pfsyncr_syncpeer = *sin;
-//		break;
-//	}
-//#endif
-//	default:
-//		errx(1, "syncpeer address %s not supported", val);
-//	}
+	switch (peerres->ai_family) {
+#ifdef INET
+	case AF_INET: {
+		struct sockaddr_in *sin = (struct sockaddr_in *)peerres->ai_addr;
+
+		if (IN_MULTICAST(ntohl(sin->sin_addr.s_addr)))
+			errx(1, "syncpeer address cannot be multicast");
+
+		preq.pfsyncr_syncpeer.s_addr = sin->sin_addr.s_addr;
+		break;
+	}
+#endif
+	default:
+		errx(1, "syncpeer address %s not supported", val);
+	}
 
 	if (ioctl(s, SIOCSETPFSYNC, (caddr_t)&ifr) == -1)
 		err(1, "SIOCSETPFSYNC");
@@ -144,6 +144,7 @@ unsetpfsync_syncpeer(const char *val, int d, int s, const struct afswtch *rafp)
 	if (ioctl(s, SIOCGETPFSYNC, (caddr_t)&ifr) == -1)
 		err(1, "SIOCGETPFSYNC");
 
+	preq.pfsyncr_syncpeer.s_addr = 0;
 //	switch (preq.pfsyncr_syncpeer.sa.sa_family) {
 //#ifdef INET
 //	case AF_INET:
@@ -203,35 +204,42 @@ void
 pfsync_status(int s)
 {
 //	char syncpeer[NI_MAXHOST];
+	struct pfsyncioc_nv nv;
 	struct pfsyncreq preq;
-	nvlist_t *nvl;
 	struct sockaddr *syncpeer_sa;
-	void *buf;
-//	int error;
+	nvlist_t *nvl;
+	void *data;
+	int error;
 
-	buf = malloc(IFR_CAP_NV_MAXBUFSIZE);
+	data = malloc(IFR_CAP_NV_MAXBUFSIZE);
+	if (data == NULL)
+		err(1, "malloc");
+	nv.data = data;
+	nv.size = IFR_CAP_NV_MAXBUFSIZE;
+	nv.len = 0;
 
-	ifr.ifr_cap_nv.buffer = buf;
-	ifr.ifr_cap_nv.buf_length = IFR_CAP_NV_MAXBUFSIZE;
+	ifr.ifr_data = (caddr_t)&nv;
 
-	printf("Before ioctl");
-	if (ioctl(s, SIOCGETPFSYNCNV, (caddr_t)&ifr) != 0)
-		err(1, "SIOCGETPFSYNCNV");
-	printf("After ioctl");
-	nvl = nvlist_unpack(ifr.ifr_cap_nv.buffer, ifr.ifr_cap_nv.length, 0);
-	if (nvl == NULL)
-		nvlist_destroy(nvl);
-		free(buf);
-		printf("fulapou");
+	printf("Before ioctl\n");
+	if (ioctl(s, SIOCGETPFSYNCNV, (caddr_t)&ifr) == -1)
 		return;
+	printf("After ioctl\n");
+
+	nvl = nvlist_unpack(nv.data, nv.len, 0);
+	if (nvl == NULL) {
+		error = nvlist_error(nvl);
+		nvlist_destroy(nvl);
+		free(nv.data);
+		return;
+	}
 
 	strlcpy(preq.pfsyncr_syncdev, nvlist_get_string(nvl, "syncdev"),
 	    IFNAMSIZ);
 	preq.pfsyncr_maxupdates = nvlist_get_number(nvl, "maxupdates");
-	preq.pfsyncr_defer = nvlist_get_number(nvl, "defer");
+	preq.pfsyncr_defer = nvlist_get_number(nvl, "flags");
 
 	nvlist_destroy(nvl);
-	free(buf);
+	free(data);
 
 
 

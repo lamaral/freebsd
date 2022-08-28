@@ -1364,11 +1364,12 @@ pfsyncioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		    sizeof(pfsyncr)));
 
 	case SIOCGETPFSYNCNV:
-		// XXX: This compiles fine now. Need to implement the
-		// ifconfig/ifpfsync.c part in order to evaluate if it is
-		// working correctly.
+	    // XXX: This compiles fine now. Need to implement the
+	    // ifconfig/ifpfsync.c part in order to evaluate if it is
+	    // working correctly.
 	    {
-	    	printf("Top of SIOCGETPFSYNCNV");
+		printf("Top of SIOCGETPFSYNCNV\n");
+		struct pfsyncioc_nv *nv = (struct pfsyncioc_nv *)ifr_data_get_ptr(ifr);
 		nvlist_t *nvl = nvlist_create(0);
 
 		if (nvl == NULL)
@@ -1377,14 +1378,13 @@ pfsyncioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		nvlist_add_string(nvl, "syncdev", sc->sc_sync_if->if_xname);
 		// TODO: Add the syncpeer nv
 		nvlist_add_number(nvl, "maxupdates", sc->sc_maxupdates);
-		nvlist_add_number(nvl, "defer", sc->sc_flags);
+		nvlist_add_number(nvl, "flags", sc->sc_flags);
 
 		void *packed = NULL;
-		size_t len;
 
 		MPASS(nvl != NULL);
 
-		packed = nvlist_pack(nvl, &len);
+		packed = nvlist_pack(nvl, &nv->len);
 		if (packed == NULL) {
 			error = nvlist_error(nvl);
 			if (error == 0)
@@ -1394,19 +1394,17 @@ pfsyncioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 			return error;
 		}
 
-		if (len > ifr->ifr_cap_nv.buf_length) {
-			ifr->ifr_cap_nv.length = len;
-			ifr->ifr_cap_nv.buffer = NULL;
-			return (EFBIG);
+		if (nv->size < nv->len) {
+			return (ENOSPC);
 		}
 
-		ifr->ifr_cap_nv.length = len;
-		error = copyout(packed, ifr->ifr_cap_nv.buffer, len);
+		error = copyout(packed, nv->data, nv->len);
+		printf("Right after copyout: %d\n", error);
 
 		free(packed, M_NVLIST);
-//		nvlist_destroy(nvl);
-		printf("Right before return error");
-		return error;
+		nvlist_destroy(nvl);
+		printf("Right before return error: %d\n", error);
+		break;
 	    }
 
 	case SIOCSETPFSYNC:

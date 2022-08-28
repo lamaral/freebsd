@@ -34,7 +34,52 @@ __FBSDID("$FreeBSD$");
 // Must be last include, I think
 #include <netpfil/pf/pfsync_nv.h>
 
-//int
-//pfsync_nvlist_to_pfsyncreq(const nvlist_t *nvl, struct pfsyncreq *pfsyncr)
-//{
-//}
+static int
+pfsync_nvlist_to_sockaddr(const nvlist_t *nvl, struct sockaddr_storage *sa)
+{
+	int af;
+
+	if (! nvlist_exists_number(nvl, "af"))
+		return (EINVAL);
+	if (! nvlist_exists_binary(nvl, "address"))
+		return (EINVAL);
+	if (! nvlist_exists_number(nvl, "port"))
+		return (EINVAL);
+
+	af = nvlist_get_number(nvl, "af");
+
+	switch (af) {
+#ifdef INET
+	case AF_INET: {
+		struct sockaddr_in *in = (struct sockaddr_in *)sa;
+		size_t len;
+		const void *addr = nvlist_get_binary(nvl, "address", &len);
+		in->sin_family = af;
+		if (len != sizeof(in->sin_addr))
+			return (EINVAL);
+
+		memcpy(&in->sin_addr, addr, sizeof(in->sin_addr));
+		in->sin_port = nvlist_get_number(nvl, "port");
+		break;
+	}
+#endif
+#ifdef INET6
+	case AF_INET6: {
+		struct sockaddr_in6 *in6 = (struct sockaddr_in6 *)sa;
+		size_t len;
+		const void *addr = nvlist_get_binary(nvl, "address", &len);
+		in6->sin6_family = af;
+		if (len != sizeof(in6->sin6_addr))
+			return (EINVAL);
+
+		memcpy(&in6->sin6_addr, addr, sizeof(in6->sin6_addr));
+		in6->sin6_port = nvlist_get_number(nvl, "port");
+		break;
+	}
+#endif
+	default:
+		return (EINVAL);
+	}
+
+	return (0);
+}
