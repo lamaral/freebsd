@@ -209,7 +209,6 @@ pfsync_status(int s)
 	struct sockaddr *syncpeer_sa;
 	nvlist_t *nvl;
 	void *data;
-	int error;
 
 	data = malloc(IFR_CAP_NV_MAXBUFSIZE);
 	if (data == NULL)
@@ -227,8 +226,6 @@ pfsync_status(int s)
 
 	nvl = nvlist_unpack(nv.data, nv.len, 0);
 	if (nvl == NULL) {
-		error = nvlist_error(nvl);
-		nvlist_destroy(nvl);
 		free(nv.data);
 		return;
 	}

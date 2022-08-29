@@ -92,8 +92,6 @@ __FBSDID("$FreeBSD$");
 #include <net/pfvar.h>
 #include <net/if_pfsync.h>
 
-#include <netpfil/pf/pfsync_nv.h>
-
 #include <netinet/if_ether.h>
 #include <netinet/in.h>
 #include <netinet/in_var.h>
@@ -103,6 +101,8 @@ __FBSDID("$FreeBSD$");
 #include <netinet/tcp.h>
 #include <netinet/tcp_fsm.h>
 #include <netinet/tcp_seq.h>
+
+#include <netpfil/pf/pfsync_nv.h>
 
 struct pfsync_bucket;
 
@@ -1376,7 +1376,7 @@ pfsyncioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 			return (ENOMEM);
 
 		nvlist_add_string(nvl, "syncdev", sc->sc_sync_if->if_xname);
-		// TODO: Add the syncpeer nv
+		// TODO: Add the syncpeer to the nvlist
 		nvlist_add_number(nvl, "maxupdates", sc->sc_maxupdates);
 		nvlist_add_number(nvl, "flags", sc->sc_flags);
 

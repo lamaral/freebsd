@@ -29,21 +29,20 @@
 #include <sys/cdefs.h>
 __FBSDID("$FreeBSD$");
 
-//#include <net/if_pfsync.h>
+#include <sys/param.h>
+#include <sys/errno.h>
 
-// Must be last include, I think
 #include <netpfil/pf/pfsync_nv.h>
 
-static int
+// TODO: Write a converter between nvlists and pfsync_softc and vice versa
+int
 pfsync_nvlist_to_sockaddr(const nvlist_t *nvl, struct sockaddr_storage *sa)
 {
 	int af;
 
-	if (! nvlist_exists_number(nvl, "af"))
+	if (!nvlist_exists_number(nvl, "af"))
 		return (EINVAL);
-	if (! nvlist_exists_binary(nvl, "address"))
-		return (EINVAL);
-	if (! nvlist_exists_number(nvl, "port"))
+	if (!nvlist_exists_binary(nvl, "address"))
 		return (EINVAL);
 
 	af = nvlist_get_number(nvl, "af");
@@ -59,7 +58,6 @@ pfsync_nvlist_to_sockaddr(const nvlist_t *nvl, struct sockaddr_storage *sa)
 			return (EINVAL);
 
 		memcpy(&in->sin_addr, addr, sizeof(in->sin_addr));
-		in->sin_port = nvlist_get_number(nvl, "port");
 		break;
 	}
 #endif
@@ -73,7 +71,6 @@ pfsync_nvlist_to_sockaddr(const nvlist_t *nvl, struct sockaddr_storage *sa)
 			return (EINVAL);
 
 		memcpy(&in6->sin6_addr, addr, sizeof(in6->sin6_addr));
-		in6->sin6_port = nvlist_get_number(nvl, "port");
 		break;
 	}
 #endif
@@ -82,4 +79,37 @@ pfsync_nvlist_to_sockaddr(const nvlist_t *nvl, struct sockaddr_storage *sa)
 	}
 
 	return (0);
+}
+
+nvlist_t *
+pfsync_sockaddr_to_nvlist(struct sockaddr_storage *sa)
+{
+	nvlist_t *nvl;
+
+	nvl = nvlist_create(0);
+	if (nvl == NULL)
+		return (nvl);
+
+	switch (sa->ss_family) {
+#ifdef INET
+	case AF_INET: {
+		struct sockaddr_in *in = (struct sockaddr_in *)sa;
+		nvlist_add_number(nvl, "af", in.ss_family);
+		nvlist_add_binary(nvl, "address", &in, sizeof(in));
+		break;
+	}
+#endif
+#ifdef INET6
+	case AF_INET6: {
+		struct sockaddr_in6 *in6 = (struct sockaddr_in6 *)sa;
+		nvlist_add_number(nvl, "af", in6.ss_family);
+		nvlist_add_binary(nvl, "address", &in6, sizeof(in6));
+		break;
+	}
+#endif
+	default:
+		return NULL;
+	}
+
+	return (nvl);
 }

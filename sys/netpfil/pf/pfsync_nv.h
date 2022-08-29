@@ -29,4 +29,9 @@
 #ifndef _PFSYNC_NV_H
 #define _PFSYNC_NV_H
 
-#endif // _PFSYNC_NV_H
+#include <sys/nv.h>
+#include <sys/socket.h>
+
+int 		pfsync_nvlist_to_sockaddr(const nvlist_t *, struct sockaddr_storage *);
+nvlist_t	*pfsync_sockaddr_to_nvlist(struct sockaddr_storage *);
+#endif
