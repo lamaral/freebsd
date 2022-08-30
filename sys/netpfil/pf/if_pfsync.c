@@ -1366,7 +1366,7 @@ pfsyncioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 	case SIOCGETPFSYNCNV:
 	    {
 		printf("Top of SIOCGETPFSYNCNV\n");
-//		nvlist_t *nvl_syncpeer;
+		nvlist_t *nvl_syncpeer;
 		struct pfsyncioc_nv *nv = (struct pfsyncioc_nv *)ifr_data_get_ptr(ifr);
 		nvlist_t *nvl = nvlist_create(0);
 
@@ -1379,10 +1379,8 @@ pfsyncioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 			nvlist_add_string(nvl, "syncdev", sc->sc_sync_if->if_xname);
 		nvlist_add_number(nvl, "maxupdates", sc->sc_maxupdates);
 		nvlist_add_number(nvl, "flags", sc->sc_flags);
-//		nvl_syncpeer = pfsync_sockaddr_to_syncpeer_nvlist(&sc->sc_sync_peer);
-//		nvlist_add_nvlist(nvl, "syncpeer", nvl_syncpeer);
-
-		printf("Populated nvlist\n");
+		if ((nvl_syncpeer = pfsync_sockaddr_to_syncpeer_nvlist(&sc->sc_sync_peer)) != NULL)
+			nvlist_add_nvlist(nvl, "syncpeer", nvl_syncpeer);
 
 		void *packed = NULL;
 		packed = nvlist_pack(nvl, &nv->len);

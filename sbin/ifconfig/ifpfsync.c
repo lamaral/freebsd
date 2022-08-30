@@ -58,6 +58,7 @@ void setpfsync_syncpeer(const char *, int, int, const struct afswtch *);
 void setpfsync_maxupd(const char *, int, int, const struct afswtch *);
 void setpfsync_defer(const char *, int, int, const struct afswtch *);
 void pfsync_status(int);
+void oldstatus(const char *, int, int, const struct afswtch *);
 
 void
 setpfsync_syncdev(const char *val, int d, int s, const struct afswtch *rafp)
@@ -120,7 +121,7 @@ setpfsync_syncpeer(const char *val, int d, int s, const struct afswtch *rafp)
 		if (IN_MULTICAST(ntohl(sin->sin_addr.s_addr)))
 			errx(1, "syncpeer address cannot be multicast");
 
-		preq.pfsyncr_syncpeer.s_addr = sin->sin_addr.s_addr;
+		preq.pfsyncr_syncpeer = sin->sin_addr;
 		break;
 	}
 #endif
@@ -317,6 +318,36 @@ pfsync_status(int s)
 	    (status.flags & PFSYNCF_OK) ? 1 : 0);
 }
 
+void
+oldstatus(const char *val, int d, int s, const struct afswtch *rafp)
+{
+	struct pfsyncreq preq;
+
+	bzero((char *)&preq, sizeof(struct pfsyncreq));
+	ifr.ifr_data = (caddr_t)&preq;
+
+	if (ioctl(s, SIOCGETPFSYNC, (caddr_t)&ifr) == -1)
+		return;
+
+	if (preq.pfsyncr_syncdev[0] != '\0' ||
+	    preq.pfsyncr_syncpeer.s_addr != htonl(INADDR_PFSYNC_GROUP))
+		printf("\t");
+
+	if (preq.pfsyncr_syncdev[0] != '\0')
+		printf("pfsync: syncdev: %s ", preq.pfsyncr_syncdev);
+	if (preq.pfsyncr_syncpeer.s_addr != htonl(INADDR_PFSYNC_GROUP))
+		printf("syncpeer: %s ", inet_ntoa(preq.pfsyncr_syncpeer));
+
+	if (preq.pfsyncr_syncdev[0] != '\0' ||
+	    preq.pfsyncr_syncpeer.s_addr != htonl(INADDR_PFSYNC_GROUP)) {
+		printf("maxupd: %d ", preq.pfsyncr_maxupdates);
+		printf("defer: %s\n",
+		    (preq.pfsyncr_defer & PFSYNCF_DEFER) ? "on" : "off");
+		printf("\tsyncok: %d\n",
+		    (preq.pfsyncr_defer & PFSYNCF_OK) ? 1 : 0);
+	}
+}
+
 static struct cmd pfsync_cmds[] = {
 	DEF_CMD_ARG("syncdev",		setpfsync_syncdev),
 	DEF_CMD("-syncdev",	1,	unsetpfsync_syncdev),
@@ -327,6 +358,7 @@ static struct cmd pfsync_cmds[] = {
 	DEF_CMD_ARG("maxupd",		setpfsync_maxupd),
 	DEF_CMD("defer",	1,	setpfsync_defer),
 	DEF_CMD("-defer",	0,	setpfsync_defer),
+	DEF_CMD("oldstatus",    0,      oldstatus),
 };
 static struct afswtch af_pfsync = {
 	.af_name	= "af_pfsync",

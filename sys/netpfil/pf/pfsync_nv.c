@@ -87,16 +87,20 @@ pfsync_sockaddr_to_syncpeer_nvlist(struct sockaddr_storage *sa)
 {
 	nvlist_t *nvl;
 
+	printf("Top of pfsync_sockaddr_to_syncpeer_nvlist\n");
 	nvl = nvlist_create(0);
-	if (nvl == NULL)
+	if (nvl == NULL){
+		printf("pfsync_sockaddr_to_syncpeer_nvlist failed top\n");
 		return (nvl);
+	}
+
 
 	switch (sa->ss_family) {
 #ifdef INET
 	case AF_INET: {
 		struct sockaddr_in *in = (struct sockaddr_in *)sa;
 		nvlist_add_number(nvl, "af", in.ss_family);
-		nvlist_add_binary(nvl, "address", &in, sizeof(in));
+		nvlist_add_binary(nvl, "address", in, sizeof(*in));
 		break;
 	}
 #endif
@@ -104,11 +108,12 @@ pfsync_sockaddr_to_syncpeer_nvlist(struct sockaddr_storage *sa)
 	case AF_INET6: {
 		struct sockaddr_in6 *in6 = (struct sockaddr_in6 *)sa;
 		nvlist_add_number(nvl, "af", in6.ss_family);
-		nvlist_add_binary(nvl, "address", &in6, sizeof(in6));
+		nvlist_add_binary(nvl, "address", in6, sizeof(*in6));
 		break;
 	}
 #endif
 	default:
+		printf("pfsync_sockaddr_to_syncpeer_nvlist default clause\n");
 		return NULL;
 	}
 
