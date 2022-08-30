@@ -1410,10 +1410,9 @@ pfsyncioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 
 	case SIOCSETPFSYNC:
 	    {
-		// TODO: Add a compatibility layer to translate from the new
-		//  softc format to the required format for the old API
 		struct in_mfilter *imf = NULL;
 		struct ifnet *sifp;
+		struct ip *ip;
 
 		if ((error = priv_check(curthread, PRIV_NETINET_PF)) != 0)
 			return (error);
@@ -1436,16 +1435,15 @@ pfsyncioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 			imf = ip_mfilter_alloc(M_WAITOK, 0, 0);
 
 		PFSYNC_LOCK(sc);
-		struct sockaddr_in peer_addr;
-		if (sifp != NULL &&
-		    (sc->sc_sync_peer.ss_family == AF_UNSPEC)) {
-			peer_addr.sin_addr.s_addr = htonl(INADDR_PFSYNC_GROUP);
+		struct sockaddr_in *sin =
+		    (struct sockaddr_in *)&sc->sc_sync_peer;
+		sin->sin_family = AF_INET;
+		sin->sin_len = sizeof(sin);
+		if (pfsyncr.pfsyncr_syncpeer.s_addr == 0) {
+			sin->sin_addr.s_addr = htonl(INADDR_PFSYNC_GROUP);
 		} else {
-			peer_addr.sin_addr.s_addr =
-			    pfsyncr.pfsyncr_syncpeer.s_addr;
+			sin->sin_addr.s_addr = pfsyncr.pfsyncr_syncpeer.s_addr;
 		}
-		peer_addr.sin_family = AF_INET;
-		memcpy(&sc->sc_sync_peer, &peer_addr, peer_addr.sin_len);
 
 		sc->sc_maxupdates = pfsyncr.pfsyncr_maxupdates;
 		if (pfsyncr.pfsyncr_defer & PFSYNCF_DEFER) {
@@ -1478,8 +1476,7 @@ pfsyncioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 
 		pfsync_multicast_cleanup(sc);
 
-		if (((struct sockaddr_in *)&sc->sc_sync_peer)
-			->sin_addr.s_addr == htonl(INADDR_PFSYNC_GROUP)) {
+		if (sin->sin_addr.s_addr == htonl(INADDR_PFSYNC_GROUP)) {
 			error = pfsync_multicast_setup(sc, sifp, imf);
 			if (error) {
 				if_rele(sifp);
@@ -1492,25 +1489,18 @@ pfsyncioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 			if_rele(sc->sc_sync_if);
 		sc->sc_sync_if = sifp;
 
-		switch (sc->sc_sync_peer.ss_family) {
-#ifdef INET
-		case AF_INET:
-		    {
-			struct ip *ip;
-			ip = &sc->sc_template.ipv4;
-			bzero(ip, sizeof(*ip));
-			ip->ip_v = IPVERSION;
-			ip->ip_hl = sizeof(sc->sc_template.ipv4) >> 2;
-			ip->ip_tos = IPTOS_LOWDELAY;
-			/* len and id are set later. */
-			ip->ip_off = htons(IP_DF);
-			ip->ip_ttl = PFSYNC_DFLTTL;
-			ip->ip_p = IPPROTO_PFSYNC;
-			ip->ip_src.s_addr = INADDR_ANY;
-			ip->ip_dst = ((struct sockaddr_in *)&sc->sc_sync_peer)->sin_addr;
-		    }
-#endif
-		}
+		ip = &sc->sc_template.ipv4;
+		bzero(ip, sizeof(*ip));
+		ip->ip_v = IPVERSION;
+		ip->ip_hl = sizeof(sc->sc_template.ipv4) >> 2;
+		ip->ip_tos = IPTOS_LOWDELAY;
+		/* len and id are set later. */
+		ip->ip_off = htons(IP_DF);
+		ip->ip_ttl = PFSYNC_DFLTTL;
+		ip->ip_p = IPPROTO_PFSYNC;
+		ip->ip_src.s_addr = INADDR_ANY;
+		ip->ip_dst.s_addr = sin->sin_addr.s_addr;
+
 		/* Request a full state table update. */
 		if ((sc->sc_flags & PFSYNCF_OK) && carp_demote_adj_p)
 			(*carp_demote_adj_p)(V_pfsync_carp_adj,
