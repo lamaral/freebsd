@@ -213,7 +213,7 @@ struct pfsync_softc {
 	struct ifnet		*sc_ifp;
 	struct ifnet		*sc_sync_if;
 	struct ip_moptions	sc_imo;
-	union pfsync_sockaddr	sc_sync_peer;
+	struct sockaddr_storage	sc_sync_peer;
 	uint32_t		sc_flags;
 	uint8_t			sc_maxupdates;
 	union inet_template     sc_template;
@@ -1356,7 +1356,7 @@ pfsyncioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 			strlcpy(pfsyncr.pfsyncr_syncdev,
 			    sc->sc_sync_if->if_xname, IFNAMSIZ);
 		}
-		pfsyncr.pfsyncr_syncpeer = sc->sc_sync_peer.in4.sin_addr;
+		pfsyncr.pfsyncr_syncpeer = ((struct sockaddr_in *)&sc->sc_sync_peer)->sin_addr;
 		pfsyncr.pfsyncr_maxupdates = sc->sc_maxupdates;
 		pfsyncr.pfsyncr_defer = sc->sc_flags;
 		PFSYNC_UNLOCK(sc);
@@ -1364,26 +1364,27 @@ pfsyncioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		    sizeof(pfsyncr)));
 
 	case SIOCGETPFSYNCNV:
-	    // XXX: This compiles fine now. Need to implement the
-	    // ifconfig/ifpfsync.c part in order to evaluate if it is
-	    // working correctly.
 	    {
 		printf("Top of SIOCGETPFSYNCNV\n");
+//		nvlist_t *nvl_syncpeer;
 		struct pfsyncioc_nv *nv = (struct pfsyncioc_nv *)ifr_data_get_ptr(ifr);
 		nvlist_t *nvl = nvlist_create(0);
 
 		if (nvl == NULL)
 			return (ENOMEM);
 
-		nvlist_add_string(nvl, "syncdev", sc->sc_sync_if->if_xname);
-		// TODO: Add the syncpeer to the nvlist
+		printf("Sanity check: %zu %zu\n", nv->size, nv->len);
+		printf("Created nvlist successfully\n");
+		if (sc->sc_sync_if)
+			nvlist_add_string(nvl, "syncdev", sc->sc_sync_if->if_xname);
 		nvlist_add_number(nvl, "maxupdates", sc->sc_maxupdates);
 		nvlist_add_number(nvl, "flags", sc->sc_flags);
+//		nvl_syncpeer = pfsync_sockaddr_to_syncpeer_nvlist(&sc->sc_sync_peer);
+//		nvlist_add_nvlist(nvl, "syncpeer", nvl_syncpeer);
+
+		printf("Populated nvlist\n");
 
 		void *packed = NULL;
-
-		MPASS(nvl != NULL);
-
 		packed = nvlist_pack(nvl, &nv->len);
 		if (packed == NULL) {
 			error = nvlist_error(nvl);
@@ -1391,8 +1392,10 @@ pfsyncioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 				error = EDOOFUS;
 			free(packed, M_NVLIST);
 			nvlist_destroy(nvl);
+			printf("nvlist_pack failed: %d\n", error);
 			return error;
 		}
+		printf("Packed nvlist\n");
 
 		if (nv->size < nv->len) {
 			return (ENOSPC);
@@ -1437,16 +1440,14 @@ pfsyncioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		PFSYNC_LOCK(sc);
 		struct sockaddr_in peer_addr;
 		if (sifp != NULL &&
-		    (sc->sc_sync_peer.sa.sa_family == AF_UNSPEC)) {
-			peer_addr.sin_family = AF_INET;
+		    (sc->sc_sync_peer.ss_family == AF_UNSPEC)) {
 			peer_addr.sin_addr.s_addr = htonl(INADDR_PFSYNC_GROUP);
-			sc->sc_sync_peer.in4 = peer_addr;
 		} else {
-			peer_addr.sin_family = AF_INET;
 			peer_addr.sin_addr.s_addr =
 			    pfsyncr.pfsyncr_syncpeer.s_addr;
-			sc->sc_sync_peer.in4 = peer_addr;
 		}
+		peer_addr.sin_family = AF_INET;
+		memcpy(&sc->sc_sync_peer, &peer_addr, peer_addr.sin_len);
 
 		sc->sc_maxupdates = pfsyncr.pfsyncr_maxupdates;
 		if (pfsyncr.pfsyncr_defer & PFSYNCF_DEFER) {
@@ -1479,8 +1480,8 @@ pfsyncioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 
 		pfsync_multicast_cleanup(sc);
 
-		if (sc->sc_sync_peer.in4.sin_addr.s_addr ==
-		    htonl(INADDR_PFSYNC_GROUP)) {
+		if (((struct sockaddr_in *)&sc->sc_sync_peer)
+			->sin_addr.s_addr == htonl(INADDR_PFSYNC_GROUP)) {
 			error = pfsync_multicast_setup(sc, sifp, imf);
 			if (error) {
 				if_rele(sifp);
@@ -1493,7 +1494,7 @@ pfsyncioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 			if_rele(sc->sc_sync_if);
 		sc->sc_sync_if = sifp;
 
-		switch (sc->sc_sync_peer.sa.sa_family) {
+		switch (sc->sc_sync_peer.ss_family) {
 #ifdef INET
 		case AF_INET:
 		    {
@@ -1508,8 +1509,7 @@ pfsyncioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 			ip->ip_ttl = PFSYNC_DFLTTL;
 			ip->ip_p = IPPROTO_PFSYNC;
 			ip->ip_src.s_addr = INADDR_ANY;
-			ip->ip_dst.s_addr =
-			    sc->sc_sync_peer.in4.sin_addr.s_addr;
+			ip->ip_dst = ((struct sockaddr_in *)&sc->sc_sync_peer)->sin_addr;
 		    }
 #endif
 		}
@@ -1665,7 +1665,7 @@ pfsync_sendout(int schedswi, int c)
 	m->m_len = m->m_pkthdr.len = b->b_len;
 
 	/* build the ip header */
-	switch (sc->sc_sync_peer.sa.sa_family) {
+	switch (sc->sc_sync_peer.ss_family) {
 #ifdef INET
 	case AF_INET:
 	    {
@@ -1920,7 +1920,7 @@ pfsync_defer_tmo(void *arg)
 		free(pd, M_PFSYNC);
 	PFSYNC_BUCKET_UNLOCK(b);
 
-	switch (sc->sc_sync_peer.sa.sa_family) {
+	switch (sc->sc_sync_peer.ss_family) {
 #ifdef INET
 	case AF_INET:
 		ip_output(m, NULL, NULL, 0, NULL, NULL);
@@ -2441,7 +2441,7 @@ pfsyncintr(void *arg)
 			 * own pfsync packet based on M_SKIP_FIREWALL
 			 * flag. This is XXX.
 			 */
-			switch (sc->sc_sync_peer.sa.sa_family) {
+			switch (sc->sc_sync_peer.ss_family) {
 #ifdef INET
 			case AF_INET:
 				if (m->m_flags & M_SKIP_FIREWALL) {
@@ -2475,13 +2475,13 @@ pfsync_multicast_setup(struct pfsync_softc *sc, struct ifnet *ifp,
 	if (!(ifp->if_flags & IFF_MULTICAST))
 		return (EADDRNOTAVAIL);
 
-	switch (sc->sc_sync_peer.sa.sa_family) {
+	switch (sc->sc_sync_peer.ss_family) {
 #ifdef INET
 	case AF_INET:
 	    {
 		ip_mfilter_init(&imo->imo_head);
 		imo->imo_multicast_vif = -1;
-		if ((error = in_joingroup(ifp, &sc->sc_sync_peer.in4.sin_addr, NULL,
+		if ((error = in_joingroup(ifp, &((struct sockaddr_in *)&sc->sc_sync_peer)->sin_addr, NULL,
 		    &imf->imf_inm)) != 0)
 			return (error);
 

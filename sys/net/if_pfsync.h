@@ -235,12 +235,6 @@ struct pfsyncstats {
 	u_int64_t	pfsyncs_oacts[PFSYNC_ACT_MAX];
 };
 
-union pfsync_sockaddr {
-	struct sockaddr		sa;
-	struct sockaddr_in	in4;
-	struct sockaddr_in6	in6;
-};
-
 /*
  * Configuration structure for SIOCSETPFSYNC SIOCGETPFSYNC
  */
@@ -251,6 +245,13 @@ struct pfsyncreq {
 #define	PFSYNCF_OK		0x00000001
 #define	PFSYNCF_DEFER		0x00000002
 	int		 pfsyncr_defer;
+};
+
+struct pfsync_kstatus {
+	char		 	syncdev[IFNAMSIZ];
+	struct sockaddr_storage	syncpeer;
+	int		 	maxupdates;
+	int		 	flags;
 };
 
 struct pfsyncioc_nv {

@@ -36,7 +36,8 @@ __FBSDID("$FreeBSD$");
 
 // TODO: Write a converter between nvlists and pfsync_softc and vice versa
 int
-pfsync_nvlist_to_sockaddr(const nvlist_t *nvl, struct sockaddr_storage *sa)
+pfsync_syncpeer_nvlist_to_sockaddr(const nvlist_t *nvl,
+    struct sockaddr_storage *sa)
 {
 	int af;
 
@@ -82,7 +83,7 @@ pfsync_nvlist_to_sockaddr(const nvlist_t *nvl, struct sockaddr_storage *sa)
 }
 
 nvlist_t *
-pfsync_sockaddr_to_nvlist(struct sockaddr_storage *sa)
+pfsync_sockaddr_to_syncpeer_nvlist(struct sockaddr_storage *sa)
 {
 	nvlist_t *nvl;
 
@@ -110,6 +111,41 @@ pfsync_sockaddr_to_nvlist(struct sockaddr_storage *sa)
 	default:
 		return NULL;
 	}
+
+	return (nvl);
+}
+
+int
+pfsync_nvstatus_to_kstatus(const nvlist_t *nvl, struct pfsync_kstatus *status)
+{
+	struct sockaddr_storage addr;
+	int ret = 0;
+
+	if (nvlist_exists_string(nvl, "syncdev"))
+		strlcpy(status->syncdev, nvlist_get_string(nvl, "syncdev"),
+		    IFNAMSIZ);
+	if (nvlist_exists_number(nvl, "maxupdates"))
+		status->maxupdates = nvlist_get_number(nvl, "maxupdates");
+	if (nvlist_exists_number(nvl, "flags"))
+		status->flags = nvlist_get_number(nvl, "flags");
+	if (nvlist_exists_nvlist(nvl, "syncpeer")) {
+		ret = pfsync_syncpeer_nvlist_to_sockaddr(nvl, &addr);
+		if (ret != 0)
+			return (ret);
+		status->syncpeer = addr;
+	}
+
+	return 0;
+}
+
+nvlist_t *
+pfsync_kstatus_to_nvstatus(struct pfsync_kstatus *status)
+{
+	nvlist_t *nvl;
+
+	nvl = nvlist_create(0);
+	if (nvl == NULL)
+		return (nvl);
 
 	return (nvl);
 }

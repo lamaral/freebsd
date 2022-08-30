@@ -32,6 +32,12 @@
 #include <sys/nv.h>
 #include <sys/socket.h>
 
-int 		pfsync_nvlist_to_sockaddr(const nvlist_t *, struct sockaddr_storage *);
-nvlist_t	*pfsync_sockaddr_to_nvlist(struct sockaddr_storage *);
+#include <net/if.h>
+#include <net/if_var.h>
+#include <net/if_pfsync.h>
+
+int 		pfsync_syncpeer_nvlist_to_sockaddr(const nvlist_t *, struct sockaddr_storage *);
+nvlist_t	*pfsync_sockaddr_to_syncpeer_nvlist(struct sockaddr_storage *);
+int		pfsync_nvstatus_to_kstatus(const nvlist_t *, struct pfsync_kstatus *);
+nvlist_t	*pfsync_kstatus_to_nvstatus(struct pfsync_kstatus *);
 #endif
