@@ -29,6 +29,9 @@
 #include <sys/cdefs.h>
 __FBSDID("$FreeBSD$");
 
+#include "opt_inet.h"
+#include "opt_inet6.h"
+
 #include <sys/param.h>
 #include <sys/errno.h>
 
@@ -94,12 +97,13 @@ pfsync_sockaddr_to_syncpeer_nvlist(struct sockaddr_storage *sa)
 		return (nvl);
 	}
 
-	printf("pfsync_sockaddr_to_syncpeer_nvlist family is %d", sa->ss_family);
+	printf("pfsync_sockaddr_to_syncpeer_nvlist family is %d\n", sa->ss_family);
 	switch (sa->ss_family) {
 #ifdef INET
 	case AF_INET: {
 		struct sockaddr_in *in = (struct sockaddr_in *)sa;
-		nvlist_add_number(nvl, "af", in.ss_family);
+		printf("Sanity check sockaddr size %d\n", in->sin_len);
+		nvlist_add_number(nvl, "af", in->sin_family);
 		nvlist_add_binary(nvl, "address", in, sizeof(*in));
 		break;
 	}
@@ -107,7 +111,7 @@ pfsync_sockaddr_to_syncpeer_nvlist(struct sockaddr_storage *sa)
 #ifdef INET6
 	case AF_INET6: {
 		struct sockaddr_in6 *in6 = (struct sockaddr_in6 *)sa;
-		nvlist_add_number(nvl, "af", in6.ss_family);
+		nvlist_add_number(nvl, "af", in6->sin6_family);
 		nvlist_add_binary(nvl, "address", in6, sizeof(*in6));
 		break;
 	}

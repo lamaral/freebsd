@@ -1378,9 +1378,6 @@ pfsyncioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 			nvlist_add_string(nvl, "syncdev", sc->sc_sync_if->if_xname);
 		nvlist_add_number(nvl, "maxupdates", sc->sc_maxupdates);
 		nvlist_add_number(nvl, "flags", sc->sc_flags);
-		// TODO: Something is going wrong and looks like sc_sync_peer is arriving here without family.
-		//  Let's try dumping all of the data on the variable to see what is going on. Might be that
-		//  the SIOCSETPFSYNC code is setting the value half assed.
 		if ((nvl_syncpeer = pfsync_sockaddr_to_syncpeer_nvlist(&sc->sc_sync_peer)) != NULL)
 			nvlist_add_nvlist(nvl, "syncpeer", nvl_syncpeer);
 		else
@@ -1444,7 +1441,7 @@ pfsyncioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		struct sockaddr_in *sin =
 		    (struct sockaddr_in *)&sc->sc_sync_peer;
 		sin->sin_family = AF_INET;
-		sin->sin_len = sizeof(sin);
+		sin->sin_len = sizeof(*sin);
 		if (pfsyncr.pfsyncr_syncpeer.s_addr == 0) {
 			sin->sin_addr.s_addr = htonl(INADDR_PFSYNC_GROUP);
 		} else {

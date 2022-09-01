@@ -222,10 +222,13 @@ pfsync_syncpeer_nvlist_to_sockaddr(const nvlist_t *nvl,
 		size_t len;
 		const void *addr = nvlist_get_binary(nvl, "address", &len);
 		in->sin_family = af;
-		if (len != sizeof(in->sin_addr))
+		printf("Sanity check: %zu %zu\n", len, sizeof(*in));
+		if (len != sizeof(*in))
 			return (EINVAL);
 
-		memcpy(&in->sin_addr, addr, sizeof(in->sin_addr));
+		const struct sockaddr_in *test = (const struct sockaddr_in *)addr;
+		printf("Sanity check: %d %d\n", test->sin_len, test->sin_family);
+		memcpy(in, addr, sizeof(*in));
 		break;
 	}
 #endif
@@ -234,11 +237,10 @@ pfsync_syncpeer_nvlist_to_sockaddr(const nvlist_t *nvl,
 		struct sockaddr_in6 *in6 = (struct sockaddr_in6 *)sa;
 		size_t len;
 		const void *addr = nvlist_get_binary(nvl, "address", &len);
-		in6->sin6_family = af;
-		if (len != sizeof(in6->sin6_addr))
+		if (len != sizeof(*in6))
 			return (EINVAL);
 
-		memcpy(&in6->sin6_addr, addr, sizeof(in6->sin6_addr));
+		memcpy(in6, addr, sizeof(*in6));
 		break;
 	}
 #endif
@@ -263,9 +265,11 @@ pfsync_nvstatus_to_kstatus(const nvlist_t *nvl, struct pfsync_kstatus *status)
 	if (nvlist_exists_number(nvl, "flags"))
 		status->flags = nvlist_get_number(nvl, "flags");
 	if (nvlist_exists_nvlist(nvl, "syncpeer")) {
-		ret = pfsync_syncpeer_nvlist_to_sockaddr(nvl, &addr);
-		if (ret != 0)
+		ret = pfsync_syncpeer_nvlist_to_sockaddr(nvlist_get_nvlist(nvl, "syncpeer"), &addr);
+		if (ret == 0)
 			status->syncpeer = addr;
+		else
+			printf("pfsync_syncpeer_nvlist_to_sockaddr returned %d\n", ret);
 	}
 }
 
@@ -312,12 +316,11 @@ pfsync_status(int s)
 	if (status.syncdev[0] != '\0')
 		printf("syncdev: %s ", status.syncdev);
 
-	// TODO: Finish implementing this mess. It probably requires some midstep to turn the sockaddr_storage into a proper family.
+	// TODO: Implement the AF_INET6 part
 	if (status.syncpeer.ss_family == AF_INET &&
 	    ((struct sockaddr_in *)&(status.syncpeer))->sin_addr.s_addr != htonl(INADDR_PFSYNC_GROUP)) {
 
 		struct sockaddr *syncpeer_sa = (struct sockaddr *)&status.syncpeer;
-
 		if ((error = getnameinfo(syncpeer_sa, syncpeer_sa->sa_len,
 			 syncpeer, sizeof(syncpeer), NULL, 0, NI_NUMERICHOST)) != 0)
 			errx(1, "getnameinfo: %s", gai_strerror(error));
@@ -331,36 +334,6 @@ pfsync_status(int s)
 	    (status.flags & PFSYNCF_OK) ? 1 : 0);
 }
 
-void
-oldstatus(const char *val, int d, int s, const struct afswtch *rafp)
-{
-	struct pfsyncreq preq;
-
-	bzero((char *)&preq, sizeof(struct pfsyncreq));
-	ifr.ifr_data = (caddr_t)&preq;
-
-	if (ioctl(s, SIOCGETPFSYNC, (caddr_t)&ifr) == -1)
-		return;
-
-	if (preq.pfsyncr_syncdev[0] != '\0' ||
-	    preq.pfsyncr_syncpeer.s_addr != htonl(INADDR_PFSYNC_GROUP))
-		printf("\t");
-
-	if (preq.pfsyncr_syncdev[0] != '\0')
-		printf("pfsync: syncdev: %s ", preq.pfsyncr_syncdev);
-	if (preq.pfsyncr_syncpeer.s_addr != htonl(INADDR_PFSYNC_GROUP))
-		printf("syncpeer: %s ", inet_ntoa(preq.pfsyncr_syncpeer));
-
-	if (preq.pfsyncr_syncdev[0] != '\0' ||
-	    preq.pfsyncr_syncpeer.s_addr != htonl(INADDR_PFSYNC_GROUP)) {
-		printf("maxupd: %d ", preq.pfsyncr_maxupdates);
-		printf("defer: %s\n",
-		    (preq.pfsyncr_defer & PFSYNCF_DEFER) ? "on" : "off");
-		printf("\tsyncok: %d\n",
-		    (preq.pfsyncr_defer & PFSYNCF_OK) ? 1 : 0);
-	}
-}
-
 static struct cmd pfsync_cmds[] = {
 	DEF_CMD_ARG("syncdev",		setpfsync_syncdev),
 	DEF_CMD("-syncdev",	1,	unsetpfsync_syncdev),
@@ -371,7 +344,6 @@ static struct cmd pfsync_cmds[] = {
 	DEF_CMD_ARG("maxupd",		setpfsync_maxupd),
 	DEF_CMD("defer",	1,	setpfsync_defer),
 	DEF_CMD("-defer",	0,	setpfsync_defer),
-	DEF_CMD("oldstatus",    0,      oldstatus),
 };
 static struct afswtch af_pfsync = {
 	.af_name	= "af_pfsync",
