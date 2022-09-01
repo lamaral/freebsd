@@ -1317,6 +1317,7 @@ pfsyncioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 	struct pfsync_softc *sc = ifp->if_softc;
 	struct ifreq *ifr = (struct ifreq *)data;
 	struct pfsyncreq pfsyncr;
+	size_t nvbuflen;
 	int error;
 	int c;
 
@@ -1367,23 +1368,26 @@ pfsyncioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 	    {
 		printf("Top of SIOCGETPFSYNCNV\n");
 		nvlist_t *nvl_syncpeer;
-		struct pfsyncioc_nv *nv = (struct pfsyncioc_nv *)ifr_data_get_ptr(ifr);
 		nvlist_t *nvl = nvlist_create(0);
 
 		if (nvl == NULL)
 			return (ENOMEM);
 
-		printf("Sanity check: %zu %zu\n", nv->size, nv->len);
 		printf("Created nvlist successfully\n");
 		if (sc->sc_sync_if)
 			nvlist_add_string(nvl, "syncdev", sc->sc_sync_if->if_xname);
 		nvlist_add_number(nvl, "maxupdates", sc->sc_maxupdates);
 		nvlist_add_number(nvl, "flags", sc->sc_flags);
+		// TODO: Something is going wrong and looks like sc_sync_peer is arriving here without family.
+		//  Let's try dumping all of the data on the variable to see what is going on. Might be that
+		//  the SIOCSETPFSYNC code is setting the value half assed.
 		if ((nvl_syncpeer = pfsync_sockaddr_to_syncpeer_nvlist(&sc->sc_sync_peer)) != NULL)
 			nvlist_add_nvlist(nvl, "syncpeer", nvl_syncpeer);
+		else
+			printf("nvl_syncpeer is NULL\n");
 
 		void *packed = NULL;
-		packed = nvlist_pack(nvl, &nv->len);
+		packed = nvlist_pack(nvl, &nvbuflen);
 		if (packed == NULL) {
 			error = nvlist_error(nvl);
 			if (error == 0)
@@ -1395,16 +1399,18 @@ pfsyncioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		}
 		printf("Packed nvlist\n");
 
-		if (nv->size < nv->len) {
-			return (ENOSPC);
+		if (nvbuflen > ifr->ifr_cap_nv.buf_length) {
+			ifr->ifr_cap_nv.length = nvbuflen;
+			ifr->ifr_cap_nv.buffer = NULL;
+			return (EFBIG);
 		}
 
-		error = copyout(packed, nv->data, nv->len);
+		ifr->ifr_cap_nv.length = nvbuflen;
+		error = copyout(packed, ifr->ifr_cap_nv.buffer, nvbuflen);
 		printf("Right after copyout: %d\n", error);
 
 		free(packed, M_NVLIST);
 		nvlist_destroy(nvl);
-		printf("Right before return error: %d\n", error);
 		break;
 	    }
 

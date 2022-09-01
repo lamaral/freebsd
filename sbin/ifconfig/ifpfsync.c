@@ -272,32 +272,33 @@ pfsync_nvstatus_to_kstatus(const nvlist_t *nvl, struct pfsync_kstatus *status)
 void
 pfsync_status(int s)
 {
-	struct pfsyncioc_nv nv;
 	struct pfsync_kstatus status;
+	char syncpeer[NI_MAXHOST];
 	nvlist_t *nvl;
+	int error;
 	void *data;
 
 	memset((char *)&status, 0, sizeof(struct pfsync_kstatus));
+	memset((char *)&syncpeer, 0, NI_MAXHOST);
+
 
 	data = malloc(IFR_CAP_NV_MAXBUFSIZE);
 	if (data == NULL)
 		err(1, "malloc");
-	nv.data = data;
-	nv.size = IFR_CAP_NV_MAXBUFSIZE;
-	nv.len = 0;
 
-	ifr.ifr_data = (caddr_t)&nv;
+	ifr.ifr_cap_nv.buffer = data;
+	ifr.ifr_cap_nv.buf_length = IFR_CAP_NV_MAXBUFSIZE;
+	ifr.ifr_cap_nv.length = 0;
 
 	printf("Before ioctl\n");
 	if (ioctl(s, SIOCGETPFSYNCNV, (caddr_t)&ifr) == -1)
 		return;
 	printf("After ioctl\n");
 
-	nvl = nvlist_unpack(nv.data, nv.len, 0);
-	if (nvl == NULL) {
-		free(nv.data);
-		return;
-	}
+	nvl = nvlist_unpack(ifr.ifr_cap_nv.buffer,
+	    ifr.ifr_cap_nv.length, 0);
+	if (nvl == NULL)
+		err(1, "nvlist_unpack");
 
 	pfsync_nvstatus_to_kstatus(nvl, &status);
 
@@ -310,6 +311,18 @@ pfsync_status(int s)
 
 	if (status.syncdev[0] != '\0')
 		printf("syncdev: %s ", status.syncdev);
+
+	// TODO: Finish implementing this mess. It probably requires some midstep to turn the sockaddr_storage into a proper family.
+	if (status.syncpeer.ss_family == AF_INET &&
+	    ((struct sockaddr_in *)&(status.syncpeer))->sin_addr.s_addr != htonl(INADDR_PFSYNC_GROUP)) {
+
+		struct sockaddr *syncpeer_sa = (struct sockaddr *)&status.syncpeer;
+
+		if ((error = getnameinfo(syncpeer_sa, syncpeer_sa->sa_len,
+			 syncpeer, sizeof(syncpeer), NULL, 0, NI_NUMERICHOST)) != 0)
+			errx(1, "getnameinfo: %s", gai_strerror(error));
+		printf("syncpeer: %s ", syncpeer);
+	}
 
 	printf("maxupd: %d ", status.maxupdates);
 	printf("defer: %s\n",

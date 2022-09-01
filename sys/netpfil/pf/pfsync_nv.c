@@ -94,7 +94,7 @@ pfsync_sockaddr_to_syncpeer_nvlist(struct sockaddr_storage *sa)
 		return (nvl);
 	}
 
-
+	printf("pfsync_sockaddr_to_syncpeer_nvlist family is %d", sa->ss_family);
 	switch (sa->ss_family) {
 #ifdef INET
 	case AF_INET: {
