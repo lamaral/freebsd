@@ -33,6 +33,7 @@
 #include <sys/ioctl.h>
 #include <sys/nv.h>
 #include <sys/socket.h>
+#include <sys/fcntl.h>
 
 #include <net/if.h>
 #include <netinet/in.h>
@@ -47,7 +48,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-#include <sys/fcntl.h>
 
 #include "ifconfig.h"
 
@@ -66,7 +66,7 @@ pfsync_do_ioctl(int s, uint cmd, nvlist_t **nvl)
 	void *data;
 	size_t nvlen;
 
-	int  fd =	fcntl(1, 0, 0);
+	int fd = fcntl(1, 0, 0);
 	nvlist_dump(*nvl, fd);
 
 	if (nvlist_exists_nvlist(*nvl, "syncpeer")) {
@@ -147,36 +147,47 @@ pfsync_sockaddr_to_syncpeer_nvlist(struct sockaddr_storage *sa)
 void
 setpfsync_syncdev(const char *val, int d, int s, const struct afswtch *rafp)
 {
-	struct pfsyncreq preq;
+	char *syncdev;
+	nvlist_t *nvl = nvlist_create(0);
 
-	bzero((char *)&preq, sizeof(struct pfsyncreq));
-	ifr.ifr_data = (caddr_t)&preq;
+	if (pfsync_do_ioctl(s, SIOCGETPFSYNCNV, &nvl) == -1)
+		err(1, "SIOCGETPFSYNCNV");
 
-	if (ioctl(s, SIOCGETPFSYNC, (caddr_t)&ifr) == -1)
-		err(1, "SIOCGETPFSYNC");
+	if (nvlist_exists_string(nvl, "syncdev")) {
+		syncdev = nvlist_take_string(nvl, "syncdev");
+	} else {
+		syncdev = malloc(IFNAMSIZ);
+	}
 
-	strlcpy(preq.pfsyncr_syncdev, val, sizeof(preq.pfsyncr_syncdev));
+	memset(syncdev, 0, IFNAMSIZ);
+	strlcpy(syncdev, val, IFNAMSIZ);
+	nvlist_add_string(nvl, "syncdev", syncdev);
 
-	if (ioctl(s, SIOCSETPFSYNC, (caddr_t)&ifr) == -1)
-		err(1, "SIOCSETPFSYNC");
+	if (pfsync_do_ioctl(s, SIOCSETPFSYNCNV, &nvl) == -1)
+		err(1, "SIOCSETPFSYNCNV");
 }
 
 /* ARGSUSED */
 void
 unsetpfsync_syncdev(const char *val, int d, int s, const struct afswtch *rafp)
 {
-	struct pfsyncreq preq;
+	char *syncdev;
+	nvlist_t *nvl = nvlist_create(0);
 
-	bzero((char *)&preq, sizeof(struct pfsyncreq));
-	ifr.ifr_data = (caddr_t)&preq;
+	if (pfsync_do_ioctl(s, SIOCGETPFSYNCNV, &nvl) == -1)
+		err(1, "SIOCGETPFSYNCNV");
 
-	if (ioctl(s, SIOCGETPFSYNC, (caddr_t)&ifr) == -1)
-		err(1, "SIOCGETPFSYNC");
+	if (nvlist_exists_string(nvl, "syncdev")) {
+		syncdev = nvlist_take_string(nvl, "syncdev");
+	} else {
+		syncdev = malloc(IFNAMSIZ);
+	}
 
-	bzero((char *)&preq.pfsyncr_syncdev, sizeof(preq.pfsyncr_syncdev));
+	memset(syncdev, 0, IFNAMSIZ);
+	nvlist_add_string(nvl, "syncdev", syncdev);
 
-	if (ioctl(s, SIOCSETPFSYNC, (caddr_t)&ifr) == -1)
-		err(1, "SIOCSETPFSYNC");
+	if (pfsync_do_ioctl(s, SIOCSETPFSYNCNV, &nvl) == -1)
+		err(1, "SIOCSETPFSYNCNV");
 }
 
 /* ARGSUSED */
@@ -199,7 +210,8 @@ setpfsync_syncpeer(const char *val, int d, int s, const struct afswtch *rafp)
 	switch (peerres->ai_family) {
 #ifdef INET
 	case AF_INET: {
-		struct sockaddr_in *sin = (struct sockaddr_in *)peerres->ai_addr;
+		struct sockaddr_in *sin = (struct sockaddr_in *)
+					      peerres->ai_addr;
 
 		if (IN_MULTICAST(ntohl(sin->sin_addr.s_addr)))
 			errx(1, "syncpeer address cannot be multicast");
@@ -216,7 +228,8 @@ setpfsync_syncpeer(const char *val, int d, int s, const struct afswtch *rafp)
 		nvlist_free_nvlist(nvl, "syncpeer");
 	}
 
-	nvlist_add_nvlist(nvl, "syncpeer", pfsync_sockaddr_to_syncpeer_nvlist(&addr));
+	nvlist_add_nvlist(nvl, "syncpeer",
+	    pfsync_sockaddr_to_syncpeer_nvlist(&addr));
 
 	if (pfsync_do_ioctl(s, SIOCSETPFSYNCNV, &nvl) == -1)
 		err(1, "SIOCSETPFSYNCNV");
@@ -230,9 +243,8 @@ void
 unsetpfsync_syncpeer(const char *val, int d, int s, const struct afswtch *rafp)
 {
 	struct sockaddr_storage addr;
-
 	memset(&addr, 0, sizeof(addr));
-	// TODO: Fix this function. It's currently FUBAR and causes a kernel panic.
+
 	nvlist_t *nvl = nvlist_create(0);
 
 	if (pfsync_do_ioctl(s, SIOCGETPFSYNCNV, &nvl) == -1)
@@ -241,10 +253,8 @@ unsetpfsync_syncpeer(const char *val, int d, int s, const struct afswtch *rafp)
 	if (nvlist_exists_nvlist(nvl, "syncpeer"))
 		nvlist_free_nvlist(nvl, "syncpeer");
 
-	nvlist_add_nvlist(nvl, "syncpeer", pfsync_sockaddr_to_syncpeer_nvlist(&addr));
-
-	int fd = fcntl(1, 0, 0);
-	nvlist_dump(nvl, fd);
+	nvlist_add_nvlist(nvl, "syncpeer",
+	    pfsync_sockaddr_to_syncpeer_nvlist(&addr));
 
 	if (pfsync_do_ioctl(s, SIOCSETPFSYNCNV, &nvl) == -1)
 		err(1, "SIOCSETPFSYNCNV");
@@ -354,11 +364,15 @@ pfsync_nvstatus_to_kstatus(const nvlist_t *nvl, struct pfsync_kstatus *status)
 	if (nvlist_exists_number(nvl, "flags"))
 		status->flags = nvlist_get_number(nvl, "flags");
 	if (nvlist_exists_nvlist(nvl, "syncpeer")) {
-		ret = pfsync_syncpeer_nvlist_to_sockaddr(nvlist_get_nvlist(nvl, "syncpeer"), &addr);
+		ret = pfsync_syncpeer_nvlist_to_sockaddr(nvlist_get_nvlist(nvl,
+							     "syncpeer"),
+		    &addr);
 		if (ret == 0)
 			status->syncpeer = addr;
 		else
-			printf("pfsync_syncpeer_nvlist_to_sockaddr returned %d\n", ret);
+			printf(
+			    "pfsync_syncpeer_nvlist_to_sockaddr returned %d\n",
+			    ret);
 	}
 }
 
@@ -384,8 +398,7 @@ pfsync_status(int s)
 
 	nvlist_destroy(nvl);
 
-	if (status.syncdev[0] != '\0' ||
-	    status.syncpeer.ss_family != AF_UNSPEC)
+	if (status.syncdev[0] != '\0' || status.syncpeer.ss_family != AF_UNSPEC)
 		printf("\t");
 
 	if (status.syncdev[0] != '\0')
@@ -393,20 +406,21 @@ pfsync_status(int s)
 
 	// TODO: Implement the AF_INET6 part
 	if (status.syncpeer.ss_family == AF_INET &&
-	    ((struct sockaddr_in *)&(status.syncpeer))->sin_addr.s_addr != htonl(INADDR_PFSYNC_GROUP)) {
+	    ((struct sockaddr_in *)&(status.syncpeer))->sin_addr.s_addr !=
+		htonl(INADDR_PFSYNC_GROUP)) {
 
-		struct sockaddr *syncpeer_sa = (struct sockaddr *)&status.syncpeer;
+		struct sockaddr *syncpeer_sa =
+		    (struct sockaddr *)&status.syncpeer;
 		if ((error = getnameinfo(syncpeer_sa, syncpeer_sa->sa_len,
-			 syncpeer, sizeof(syncpeer), NULL, 0, NI_NUMERICHOST)) != 0)
+			 syncpeer, sizeof(syncpeer), NULL, 0,
+			 NI_NUMERICHOST)) != 0)
 			errx(1, "getnameinfo: %s", gai_strerror(error));
 		printf("syncpeer: %s ", syncpeer);
 	}
 
 	printf("maxupd: %d ", status.maxupdates);
-	printf("defer: %s\n",
-	    (status.flags & PFSYNCF_DEFER) ? "on" : "off");
-	printf("\tsyncok: %d\n",
-	    (status.flags & PFSYNCF_OK) ? 1 : 0);
+	printf("defer: %s\n", (status.flags & PFSYNCF_DEFER) ? "on" : "off");
+	printf("\tsyncok: %d\n", (status.flags & PFSYNCF_OK) ? 1 : 0);
 }
 
 static struct cmd pfsync_cmds[] = {
