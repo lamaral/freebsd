@@ -33,7 +33,6 @@
 #include <sys/ioctl.h>
 #include <sys/nv.h>
 #include <sys/socket.h>
-#include <sys/fcntl.h>
 
 #include <net/if.h>
 #include <netinet/in.h>
@@ -65,15 +64,6 @@ pfsync_do_ioctl(int s, uint cmd, nvlist_t **nvl)
 {
 	void *data;
 	size_t nvlen;
-
-	int fd = fcntl(1, 0, 0);
-	nvlist_dump(*nvl, fd);
-
-	if (nvlist_exists_nvlist(*nvl, "syncpeer")) {
-		printf("pfsync_do_ioctl syncpeer is in the nvlist\n");
-	} else {
-		printf("pfsync_do_ioctl syncpeer not in the nvlist\n");
-	}
 
 	data = nvlist_pack(*nvl, &nvlen);
 	if (data == NULL)
@@ -108,20 +98,15 @@ pfsync_sockaddr_to_syncpeer_nvlist(struct sockaddr_storage *sa)
 {
 	nvlist_t *nvl;
 
-	printf("Top of pfsync_sockaddr_to_syncpeer_nvlist\n");
 	nvl = nvlist_create(0);
 	if (nvl == NULL) {
-		printf("pfsync_sockaddr_to_syncpeer_nvlist failed top\n");
 		return (nvl);
 	}
 
-	printf("pfsync_sockaddr_to_syncpeer_nvlist family is %d\n",
-	    sa->ss_family);
 	switch (sa->ss_family) {
 #ifdef INET
 	case AF_INET: {
 		struct sockaddr_in *in = (struct sockaddr_in *)sa;
-		printf("Sanity check sockaddr size %d\n", in->sin_len);
 		nvlist_add_number(nvl, "af", in->sin_family);
 		nvlist_add_binary(nvl, "address", in, sizeof(*in));
 		break;
@@ -355,7 +340,6 @@ pfsync_nvstatus_to_kstatus(const nvlist_t *nvl, struct pfsync_kstatus *status)
 {
 	struct sockaddr_storage addr;
 	int ret;
-	printf("Top of pfsync_nvstatus_to_kstatus\n");
 	if (nvlist_exists_string(nvl, "syncdev"))
 		strlcpy(status->syncdev, nvlist_get_string(nvl, "syncdev"),
 		    IFNAMSIZ);
@@ -369,10 +353,6 @@ pfsync_nvstatus_to_kstatus(const nvlist_t *nvl, struct pfsync_kstatus *status)
 		    &addr);
 		if (ret == 0)
 			status->syncpeer = addr;
-		else
-			printf(
-			    "pfsync_syncpeer_nvlist_to_sockaddr returned %d\n",
-			    ret);
 	}
 }
 
@@ -389,10 +369,8 @@ pfsync_status(int s)
 
 	nvl = nvlist_create(0);
 
-	printf("Before ioctl\n");
 	if (pfsync_do_ioctl(s, SIOCGETPFSYNCNV, &nvl) == -1)
 		return;
-	printf("After ioctl\n");
 
 	pfsync_nvstatus_to_kstatus(nvl, &status);
 
@@ -404,7 +382,6 @@ pfsync_status(int s)
 	if (status.syncdev[0] != '\0')
 		printf("syncdev: %s ", status.syncdev);
 
-	// TODO: Implement the AF_INET6 part
 	if (status.syncpeer.ss_family == AF_INET &&
 	    ((struct sockaddr_in *)&(status.syncpeer))->sin_addr.s_addr !=
 		htonl(INADDR_PFSYNC_GROUP)) {

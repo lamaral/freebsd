@@ -1366,22 +1366,18 @@ pfsyncioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 
 	case SIOCGETPFSYNCNV:
 	    {
-		printf("Top of SIOCGETPFSYNCNV\n");
 		nvlist_t *nvl_syncpeer;
 		nvlist_t *nvl = nvlist_create(0);
 
 		if (nvl == NULL)
 			return (ENOMEM);
 
-		printf("Created nvlist successfully\n");
 		if (sc->sc_sync_if)
 			nvlist_add_string(nvl, "syncdev", sc->sc_sync_if->if_xname);
 		nvlist_add_number(nvl, "maxupdates", sc->sc_maxupdates);
 		nvlist_add_number(nvl, "flags", sc->sc_flags);
 		if ((nvl_syncpeer = pfsync_sockaddr_to_syncpeer_nvlist(&sc->sc_sync_peer)) != NULL)
 			nvlist_add_nvlist(nvl, "syncpeer", nvl_syncpeer);
-		else
-			printf("nvl_syncpeer is NULL\n");
 
 		void *packed = NULL;
 		packed = nvlist_pack(nvl, &nvbuflen);
@@ -1391,10 +1387,8 @@ pfsyncioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 				error = EDOOFUS;
 			free(packed, M_NVLIST);
 			nvlist_destroy(nvl);
-			printf("nvlist_pack failed: %d\n", error);
 			return error;
 		}
-		printf("Packed nvlist\n");
 
 		if (nvbuflen > ifr->ifr_cap_nv.buf_length) {
 			ifr->ifr_cap_nv.length = nvbuflen;
@@ -1404,7 +1398,6 @@ pfsyncioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 
 		ifr->ifr_cap_nv.length = nvbuflen;
 		error = copyout(packed, ifr->ifr_cap_nv.buffer, nvbuflen);
-		printf("Right after copyout: %d\n", error);
 
 		nvlist_destroy(nvl);
 		nvlist_destroy(nvl_syncpeer);
@@ -1533,8 +1526,6 @@ pfsyncioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		void *data;
 		nvlist_t *nvl;
 
-		printf("Top of SIOCSETPFSYNCNV\n");
-
 		if ((error = priv_check(curthread, PRIV_NETINET_PF)) != 0)
 			return (error);
 		if (ifr->ifr_cap_nv.length > IFR_CAP_NV_MAXBUFSIZE)
@@ -1565,29 +1556,10 @@ pfsyncioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 
 		struct sockaddr_in *status_sin =
 		    (struct sockaddr_in *)&(status.syncpeer);
-		printf("Sanity check status_sin: %d %d %d\n",
-		    status_sin->sin_family, status_sin->sin_len,
-		    status_sin->sin_addr.s_addr);
 		if (sifp != NULL && (status_sin->sin_addr.s_addr == 0 ||
 			status_sin->sin_addr.s_addr ==
 			    htonl(INADDR_PFSYNC_GROUP)))
 			imf = ip_mfilter_alloc(M_WAITOK, 0, 0);
-
-		// Keep code below for later. This makes it AF-aware.
-//		if (sifp != NULL) {
-//			switch (status.syncpeer.ss_family) {
-//			case AF_UNSPEC:
-//				imf = ip_mfilter_alloc(M_WAITOK, 0, 0);
-//				break;
-//			case AF_INET:
-//				if (status.syncpeer.s_addr == htonl(INADDR_PFSYNC_GROUP))
-//					imf = ip_mfilter_alloc(M_WAITOK, 0, 0);
-//				break;
-//			case AF_INET6:
-//				break;
-//			}
-//
-//		}
 
 		PFSYNC_LOCK(sc);
 		struct sockaddr_in *sc_sin = (struct sockaddr_in *)&sc->sc_sync_peer;
@@ -1672,7 +1644,6 @@ pfsyncioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		sc);
 		PFSYNC_BUNLOCK(sc);
 
-		printf("End of SIOCSETPFSYNCNV\n");
 		break;
 	    }
 	default:

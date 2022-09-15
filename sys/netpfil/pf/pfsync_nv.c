@@ -37,7 +37,6 @@ __FBSDID("$FreeBSD$");
 
 #include <netpfil/pf/pfsync_nv.h>
 
-// TODO: Write a converter between nvlists and pfsync_softc and vice versa
 int
 pfsync_syncpeer_nvlist_to_sockaddr(const nvlist_t *nvl,
     struct sockaddr_storage *sa)
@@ -54,7 +53,6 @@ pfsync_syncpeer_nvlist_to_sockaddr(const nvlist_t *nvl,
 	switch (af) {
 #ifdef INET
 	case AF_INET: {
-		printf("Inside AF_INET\n");
 		struct sockaddr_in *in = (struct sockaddr_in *)sa;
 		size_t len;
 		const void *addr = nvlist_get_binary(nvl, "address", &len);
@@ -68,7 +66,6 @@ pfsync_syncpeer_nvlist_to_sockaddr(const nvlist_t *nvl,
 #endif
 #ifdef INET6
 	case AF_INET6: {
-		printf("Inside AF_INET6\n");
 		struct sockaddr_in6 *in6 = (struct sockaddr_in6 *)sa;
 		size_t len;
 		const void *addr = nvlist_get_binary(nvl, "address", &len);
@@ -81,7 +78,6 @@ pfsync_syncpeer_nvlist_to_sockaddr(const nvlist_t *nvl,
 	}
 #endif
 	default:
-		printf("Inside default clause\n");
 		return (EINVAL);
 	}
 
@@ -93,20 +89,15 @@ pfsync_sockaddr_to_syncpeer_nvlist(struct sockaddr_storage *sa)
 {
 	nvlist_t *nvl;
 
-	printf("Top of pfsync_sockaddr_to_syncpeer_nvlist\n");
 	nvl = nvlist_create(0);
 	if (nvl == NULL) {
-		printf("pfsync_sockaddr_to_syncpeer_nvlist failed top\n");
 		return (nvl);
 	}
 
-	printf("pfsync_sockaddr_to_syncpeer_nvlist family is %d\n",
-	    sa->ss_family);
 	switch (sa->ss_family) {
 #ifdef INET
 	case AF_INET: {
 		struct sockaddr_in *in = (struct sockaddr_in *)sa;
-		printf("Sanity check sockaddr size %d\n", in->sin_len);
 		nvlist_add_number(nvl, "af", in->sin_family);
 		nvlist_add_binary(nvl, "address", in, sizeof(*in));
 		break;
@@ -121,7 +112,6 @@ pfsync_sockaddr_to_syncpeer_nvlist(struct sockaddr_storage *sa)
 	}
 #endif
 	default:
-		printf("pfsync_sockaddr_to_syncpeer_nvlist default clause\n");
 		return NULL;
 	}
 
@@ -133,7 +123,6 @@ pfsync_nvstatus_to_kstatus(const nvlist_t *nvl, struct pfsync_kstatus *status)
 {
 	struct sockaddr_storage addr;
 	int error;
-	printf("Top of pfsync_nvstatus_to_kstatus\n");
 	if (!nvlist_exists_number(nvl, "maxupdates"))
 		return (EINVAL);
 	if (!nvlist_exists_number(nvl, "flags"))
@@ -147,7 +136,6 @@ pfsync_nvstatus_to_kstatus(const nvlist_t *nvl, struct pfsync_kstatus *status)
 		    IFNAMSIZ);
 
 	if (nvlist_exists_nvlist(nvl, "syncpeer")) {
-		printf("pfsync_nvstatus_to_kstatus syncpeer is in the nvlist\n");
 		memset(&addr, 0, sizeof(addr));
 		if ((error = pfsync_syncpeer_nvlist_to_sockaddr(nvlist_get_nvlist(nvl, "syncpeer"), &addr)) == 0)
 			status->syncpeer = addr;
@@ -157,25 +145,5 @@ pfsync_nvstatus_to_kstatus(const nvlist_t *nvl, struct pfsync_kstatus *status)
 		memset(&status->syncpeer, 0, sizeof(status->syncpeer));
 	}
 
-	struct sockaddr_in *addr_sin = (struct sockaddr_in *)&addr;
-	printf("Sanity check addr: %d %d %d\n",
-	    addr_sin->sin_family, addr_sin->sin_len,
-	    addr_sin->sin_addr.s_addr);
-	struct sockaddr_in *status_sin = (struct sockaddr_in *)&status->syncpeer;
-	printf("Sanity check status_sin: %d %d %d\n",
-	    status_sin->sin_family, status_sin->sin_len,
-	    status_sin->sin_addr.s_addr);
-
 	return 0;
-}
-
-nvlist_t *
-pfsync_kstatus_to_nvstatus(struct pfsync_kstatus *status)
-{
-	nvlist_t *nvl = nvlist_create(0);
-
-	if (nvl == NULL)
-		return (nvl);
-
-	return (nvl);
 }
