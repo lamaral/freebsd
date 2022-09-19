@@ -130,21 +130,18 @@ pfsync_sockaddr_to_syncpeer_nvlist(struct sockaddr_storage *sa)
 void
 setpfsync_syncdev(const char *val, int d, int s, const struct afswtch *rafp)
 {
-	char *syncdev;
 	nvlist_t *nvl = nvlist_create(0);
+
+	if (strlen(val) > IFNAMSIZ)
+		errx(1, "interface name %s is too long", val);
 
 	if (pfsync_do_ioctl(s, SIOCGETPFSYNCNV, &nvl) == -1)
 		err(1, "SIOCGETPFSYNCNV");
 
-	if (nvlist_exists_string(nvl, "syncdev")) {
-		syncdev = nvlist_take_string(nvl, "syncdev");
-	} else {
-		syncdev = malloc(IFNAMSIZ);
-	}
+	if (nvlist_exists_string(nvl, "syncdev"))
+		nvlist_free_string(nvl, "syncdev");
 
-	memset(syncdev, 0, IFNAMSIZ);
-	strlcpy(syncdev, val, IFNAMSIZ);
-	nvlist_add_string(nvl, "syncdev", syncdev);
+	nvlist_add_string(nvl, "syncdev", val);
 
 	if (pfsync_do_ioctl(s, SIOCSETPFSYNCNV, &nvl) == -1)
 		err(1, "SIOCSETPFSYNCNV");
