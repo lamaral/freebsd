@@ -33,6 +33,7 @@
 #include <sys/ioctl.h>
 #include <sys/nv.h>
 #include <sys/socket.h>
+#include <sys/fcntl.h>
 
 #include <net/if.h>
 #include <netinet/in.h>
@@ -64,6 +65,9 @@ pfsync_do_ioctl(int s, uint cmd, nvlist_t **nvl)
 {
 	void *data;
 	size_t nvlen;
+
+	int fd = fcntl(1, 0, 0);
+	nvlist_dump(*nvl, fd);
 
 	data = nvlist_pack(*nvl, &nvlen);
 
