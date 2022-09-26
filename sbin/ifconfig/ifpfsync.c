@@ -273,7 +273,6 @@ setpfsync_defer(const char *val, int d, int s, const struct afswtch *rafp)
 	if (pfsync_do_ioctl(s, SIOCGETPFSYNCNV, &nvl) == -1)
 		err(1, "SIOCGETPFSYNCNV");
 
-	// XXX: Should this really overwrite the PFSYNCF_OK flag?
 	nvlist_free_number(nvl, "flags");
 	nvlist_add_number(nvl, "flags", d ? PFSYNCF_DEFER : 0);
 
