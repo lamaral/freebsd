@@ -1537,15 +1537,20 @@ pfsyncioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		data = malloc(ifr->ifr_cap_nv.length, M_TEMP, M_WAITOK);
 
 		if ((error = copyin(ifr->ifr_cap_nv.buffer, data,
-		    ifr->ifr_cap_nv.length)) != 0)
+		    ifr->ifr_cap_nv.length)) != 0) {
+			free(data, M_TEMP);
 			return (error);
+		}
 
-		if ((nvl = nvlist_unpack(data, ifr->ifr_cap_nv.length, 0)) == NULL)
+		if ((nvl = nvlist_unpack(data, ifr->ifr_cap_nv.length, 0)) == NULL) {
+			free(data, M_TEMP);
 			return (EINVAL);
+		}
 
 		pfsync_nvstatus_to_kstatus(nvl, &status);
 
 		nvlist_destroy(nvl);
+		free(data, M_TEMP);
 
 		if ((status.maxupdates < 0) || (status.maxupdates > 255))
 			return (EINVAL);
