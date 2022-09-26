@@ -364,8 +364,10 @@ pfsync_status(int s)
 
 	nvl = nvlist_create(0);
 
-	if (pfsync_do_ioctl(s, SIOCGETPFSYNCNV, &nvl) == -1)
+	if (pfsync_do_ioctl(s, SIOCGETPFSYNCNV, &nvl) == -1) {
+		nvlist_destroy(nvl);
 		return;
+	}
 
 	pfsync_nvstatus_to_kstatus(nvl, &status);
 
