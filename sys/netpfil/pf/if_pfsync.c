@@ -1545,7 +1545,6 @@ pfsyncioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 
 		pfsync_nvstatus_to_kstatus(nvl, &status);
 
-		// XXX: Might be too early to destroy it?
 		nvlist_destroy(nvl);
 
 		if ((status.maxupdates < 0) || (status.maxupdates > 255))
