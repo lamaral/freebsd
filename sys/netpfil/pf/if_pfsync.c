@@ -1393,6 +1393,8 @@ pfsyncioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		if (nvbuflen > ifr->ifr_cap_nv.buf_length) {
 			ifr->ifr_cap_nv.length = nvbuflen;
 			ifr->ifr_cap_nv.buffer = NULL;
+			free(packed, M_NVLIST);
+			nvlist_destroy(nvl);
 			return (EFBIG);
 		}
 
