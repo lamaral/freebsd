@@ -333,6 +333,9 @@ pfsync_nvstatus_to_kstatus(const nvlist_t *nvl, struct pfsync_kstatus *status)
 {
 	struct sockaddr_storage addr;
 	int ret;
+
+	memset((char *)status, 0, sizeof(struct pfsync_kstatus));
+
 	if (nvlist_exists_string(nvl, "syncdev"))
 		strlcpy(status->syncdev, nvlist_get_string(nvl, "syncdev"),
 		    IFNAMSIZ);
@@ -357,7 +360,6 @@ pfsync_status(int s)
 	nvlist_t *nvl;
 	int error;
 
-	memset((char *)&status, 0, sizeof(struct pfsync_kstatus));
 	memset((char *)&syncpeer, 0, NI_MAXHOST);
 
 	nvl = nvlist_create(0);
