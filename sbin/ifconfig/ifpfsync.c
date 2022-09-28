@@ -68,8 +68,6 @@ pfsync_do_ioctl(int s, uint cmd, nvlist_t **nvl)
 	data = nvlist_pack(*nvl, &nvlen);
 
 	ifr.ifr_cap_nv.buffer = malloc(IFR_CAP_NV_MAXBUFSIZE);
-	if (ifr.ifr_cap_nv.buffer == NULL)
-		err(1, "malloc");
 	memcpy(ifr.ifr_cap_nv.buffer, data, nvlen);
 	ifr.ifr_cap_nv.buf_length = IFR_CAP_NV_MAXBUFSIZE;
 	ifr.ifr_cap_nv.length = nvlen;
