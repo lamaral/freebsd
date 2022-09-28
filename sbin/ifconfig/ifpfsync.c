@@ -75,8 +75,10 @@ pfsync_do_ioctl(int s, uint cmd, nvlist_t **nvl)
 	ifr.ifr_cap_nv.length = nvlen;
 	free(data);
 
-	if (ioctl(s, cmd, (caddr_t)&ifr) == -1)
+	if (ioctl(s, cmd, (caddr_t)&ifr) == -1) {
+		free(ifr.ifr_cap_nv.buffer);
 		return -1;
+	}
 
 	nvlist_destroy(*nvl);
 	*nvl = NULL;
