@@ -199,9 +199,8 @@ setpfsync_syncpeer(const char *val, int d, int s, const struct afswtch *rafp)
 		errx(1, "syncpeer address %s not supported", val);
 	}
 
-	if (nvlist_exists_nvlist(nvl, "syncpeer")) {
+	if (nvlist_exists_nvlist(nvl, "syncpeer"))
 		nvlist_free_nvlist(nvl, "syncpeer");
-	}
 
 	nvlist_add_nvlist(nvl, "syncpeer",
 	    pfsync_sockaddr_to_syncpeer_nvlist(&addr));
