@@ -127,6 +127,52 @@ pfsync_sockaddr_to_syncpeer_nvlist(struct sockaddr_storage *sa)
 	return (nvl);
 }
 
+static int
+pfsync_syncpeer_nvlist_to_sockaddr(const nvlist_t *nvl,
+    struct sockaddr_storage *sa)
+{
+	int af;
+
+	if (!nvlist_exists_number(nvl, "af"))
+		return (EINVAL);
+	if (!nvlist_exists_binary(nvl, "address"))
+		return (EINVAL);
+
+	af = nvlist_get_number(nvl, "af");
+
+	switch (af) {
+#ifdef INET
+	case AF_INET: {
+		struct sockaddr_in *in = (struct sockaddr_in *)sa;
+		size_t len;
+		const void *addr = nvlist_get_binary(nvl, "address", &len);
+		in->sin_family = af;
+		if (len != sizeof(*in))
+			return (EINVAL);
+
+		memcpy(in, addr, sizeof(*in));
+		break;
+	}
+#endif
+#ifdef INET6
+	case AF_INET6: {
+		struct sockaddr_in6 *in6 = (struct sockaddr_in6 *)sa;
+		size_t len;
+		const void *addr = nvlist_get_binary(nvl, "address", &len);
+		if (len != sizeof(*in6))
+			return (EINVAL);
+
+		memcpy(in6, addr, sizeof(*in6));
+		break;
+	}
+#endif
+	default:
+		return (EINVAL);
+	}
+
+	return (0);
+}
+
 void
 setpfsync_syncdev(const char *val, int d, int s, const struct afswtch *rafp)
 {
@@ -275,52 +321,6 @@ setpfsync_defer(const char *val, int d, int s, const struct afswtch *rafp)
 		err(1, "SIOCSETPFSYNCNV");
 
 	nvlist_destroy(nvl);
-}
-
-static int
-pfsync_syncpeer_nvlist_to_sockaddr(const nvlist_t *nvl,
-    struct sockaddr_storage *sa)
-{
-	int af;
-
-	if (!nvlist_exists_number(nvl, "af"))
-		return (EINVAL);
-	if (!nvlist_exists_binary(nvl, "address"))
-		return (EINVAL);
-
-	af = nvlist_get_number(nvl, "af");
-
-	switch (af) {
-#ifdef INET
-	case AF_INET: {
-		struct sockaddr_in *in = (struct sockaddr_in *)sa;
-		size_t len;
-		const void *addr = nvlist_get_binary(nvl, "address", &len);
-		in->sin_family = af;
-		if (len != sizeof(*in))
-			return (EINVAL);
-
-		memcpy(in, addr, sizeof(*in));
-		break;
-	}
-#endif
-#ifdef INET6
-	case AF_INET6: {
-		struct sockaddr_in6 *in6 = (struct sockaddr_in6 *)sa;
-		size_t len;
-		const void *addr = nvlist_get_binary(nvl, "address", &len);
-		if (len != sizeof(*in6))
-			return (EINVAL);
-
-		memcpy(in6, addr, sizeof(*in6));
-		break;
-	}
-#endif
-	default:
-		return (EINVAL);
-	}
-
-	return (0);
 }
 
 static void
