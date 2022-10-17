@@ -309,6 +309,12 @@ static void	pfsync_bulk_update(void *);
 static void	pfsync_bulk_fail(void *);
 
 static void	pfsync_detach_ifnet(struct ifnet *);
+
+static int pfsync_pfsyncreq_to_kstatus(struct pfsyncreq *,
+    struct pfsync_kstatus *);
+static int pfsync_kstatus_to_softc(struct pfsync_kstatus *,
+    struct pfsync_softc *);
+
 #ifdef IPSEC
 static void	pfsync_update_net_tdb(struct pfsync_tdb *);
 #endif
@@ -1409,9 +1415,7 @@ pfsyncioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 
 	case SIOCSETPFSYNC:
 	    {
-		struct in_mfilter *imf = NULL;
-		struct ifnet *sifp;
-		struct ip *ip;
+		struct pfsync_kstatus status;
 
 		if ((error = priv_check(curthread, PRIV_NETINET_PF)) != 0)
 			return (error);
@@ -1419,112 +1423,15 @@ pfsyncioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		    sizeof(pfsyncr))))
 			return (error);
 
-		if (pfsyncr.pfsyncr_maxupdates > 255)
-			return (EINVAL);
+		memset((char *)&status, 0, sizeof(struct pfsync_kstatus));
+		pfsync_pfsyncreq_to_kstatus(&pfsyncr, &status);
 
-		if (pfsyncr.pfsyncr_syncdev[0] == 0)
-			sifp = NULL;
-		else if ((sifp = ifunit_ref(pfsyncr.pfsyncr_syncdev)) == NULL)
-			return (EINVAL);
-
-		if (sifp != NULL && (
-		    pfsyncr.pfsyncr_syncpeer.s_addr == 0 ||
-		    pfsyncr.pfsyncr_syncpeer.s_addr ==
-		    htonl(INADDR_PFSYNC_GROUP)))
-			imf = ip_mfilter_alloc(M_WAITOK, 0, 0);
-
-		PFSYNC_LOCK(sc);
-		struct sockaddr_in *sin =
-		    (struct sockaddr_in *)&sc->sc_sync_peer;
-		sin->sin_family = AF_INET;
-		sin->sin_len = sizeof(*sin);
-		if (pfsyncr.pfsyncr_syncpeer.s_addr == 0) {
-			sin->sin_addr.s_addr = htonl(INADDR_PFSYNC_GROUP);
-		} else {
-			sin->sin_addr.s_addr = pfsyncr.pfsyncr_syncpeer.s_addr;
-		}
-
-		sc->sc_maxupdates = pfsyncr.pfsyncr_maxupdates;
-		if (pfsyncr.pfsyncr_defer & PFSYNCF_DEFER) {
-			sc->sc_flags |= PFSYNCF_DEFER;
-			V_pfsync_defer_ptr = pfsync_defer;
-		} else {
-			sc->sc_flags &= ~PFSYNCF_DEFER;
-			V_pfsync_defer_ptr = NULL;
-		}
-
-		if (sifp == NULL) {
-			if (sc->sc_sync_if)
-				if_rele(sc->sc_sync_if);
-			sc->sc_sync_if = NULL;
-			pfsync_multicast_cleanup(sc);
-			PFSYNC_UNLOCK(sc);
-			break;
-		}
-
-		for (c = 0; c < pfsync_buckets; c++) {
-			PFSYNC_BUCKET_LOCK(&sc->sc_buckets[c]);
-			if (sc->sc_buckets[c].b_len > PFSYNC_MINPKT &&
-			    (sifp->if_mtu < sc->sc_ifp->if_mtu ||
-			    (sc->sc_sync_if != NULL &&
-			    sifp->if_mtu < sc->sc_sync_if->if_mtu) ||
-			    sifp->if_mtu < MCLBYTES - sizeof(struct ip)))
-				pfsync_sendout(1, c);
-			PFSYNC_BUCKET_UNLOCK(&sc->sc_buckets[c]);
-		}
-
-		pfsync_multicast_cleanup(sc);
-
-		if (sin->sin_addr.s_addr == htonl(INADDR_PFSYNC_GROUP)) {
-			error = pfsync_multicast_setup(sc, sifp, imf);
-			if (error) {
-				if_rele(sifp);
-				ip_mfilter_free(imf);
-				PFSYNC_UNLOCK(sc);
-				return (error);
-			}
-		}
-		if (sc->sc_sync_if)
-			if_rele(sc->sc_sync_if);
-		sc->sc_sync_if = sifp;
-
-		ip = &sc->sc_template.ipv4;
-		bzero(ip, sizeof(*ip));
-		ip->ip_v = IPVERSION;
-		ip->ip_hl = sizeof(sc->sc_template.ipv4) >> 2;
-		ip->ip_tos = IPTOS_LOWDELAY;
-		/* len and id are set later. */
-		ip->ip_off = htons(IP_DF);
-		ip->ip_ttl = PFSYNC_DFLTTL;
-		ip->ip_p = IPPROTO_PFSYNC;
-		ip->ip_src.s_addr = INADDR_ANY;
-		ip->ip_dst.s_addr = sin->sin_addr.s_addr;
-
-		/* Request a full state table update. */
-		if ((sc->sc_flags & PFSYNCF_OK) && carp_demote_adj_p)
-			(*carp_demote_adj_p)(V_pfsync_carp_adj,
-			    "pfsync bulk start");
-		sc->sc_flags &= ~PFSYNCF_OK;
-		if (V_pf_status.debug >= PF_DEBUG_MISC)
-			printf("pfsync: requesting bulk update\n");
-		PFSYNC_UNLOCK(sc);
-		PFSYNC_BUCKET_LOCK(&sc->sc_buckets[0]);
-		pfsync_request_update(0, 0);
-		PFSYNC_BUCKET_UNLOCK(&sc->sc_buckets[0]);
-		PFSYNC_BLOCK(sc);
-		sc->sc_ureq_sent = time_uptime;
-		callout_reset(&sc->sc_bulkfail_tmo, 5 * hz, pfsync_bulk_fail,
-		    sc);
-		PFSYNC_BUNLOCK(sc);
-
-		break;
+		error = pfsync_kstatus_to_softc(&status, sc);
+		return (error);
 	    }
 	case SIOCSETPFSYNCNV:
 	    {
 		struct pfsync_kstatus status;
-		struct in_mfilter *imf = NULL;
-		struct ifnet *sifp;
-		struct ip *ip;
 		void *data;
 		nvlist_t *nvl;
 
@@ -1533,7 +1440,6 @@ pfsyncioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		if (ifr->ifr_cap_nv.length > IFR_CAP_NV_MAXBUFSIZE)
 			return (EINVAL);
 
-		memset((char *)&status, 0, sizeof(struct pfsync_kstatus));
 		data = malloc(ifr->ifr_cap_nv.length, M_TEMP, M_WAITOK);
 
 		if ((error = copyin(ifr->ifr_cap_nv.buffer, data,
@@ -1547,110 +1453,14 @@ pfsyncioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 			return (EINVAL);
 		}
 
+		memset((char *)&status, 0, sizeof(struct pfsync_kstatus));
 		pfsync_nvstatus_to_kstatus(nvl, &status);
 
 		nvlist_destroy(nvl);
 		free(data, M_TEMP);
 
-		if ((status.maxupdates < 0) || (status.maxupdates > 255))
-			return (EINVAL);
-
-		if (status.syncdev[0] == '\0')
-			sifp = NULL;
-		else if ((sifp = ifunit_ref(status.syncdev)) == NULL)
-			return (EINVAL);
-
-		struct sockaddr_in *status_sin =
-		    (struct sockaddr_in *)&(status.syncpeer);
-		if (sifp != NULL && (status_sin->sin_addr.s_addr == 0 ||
-			status_sin->sin_addr.s_addr ==
-			    htonl(INADDR_PFSYNC_GROUP)))
-			imf = ip_mfilter_alloc(M_WAITOK, 0, 0);
-
-		PFSYNC_LOCK(sc);
-		struct sockaddr_in *sc_sin = (struct sockaddr_in *)&sc->sc_sync_peer;
-		sc_sin->sin_family = AF_INET;
-		sc_sin->sin_len = sizeof(*sc_sin);
-		if (status_sin->sin_addr.s_addr == 0) {
-			sc_sin->sin_addr.s_addr = htonl(INADDR_PFSYNC_GROUP);
-		} else {
-			sc_sin->sin_addr.s_addr = status_sin->sin_addr.s_addr;
-		}
-
-		sc->sc_maxupdates = status.maxupdates;
-		if (status.flags & PFSYNCF_DEFER) {
-			sc->sc_flags |= PFSYNCF_DEFER;
-			V_pfsync_defer_ptr = pfsync_defer;
-		} else {
-			sc->sc_flags &= ~PFSYNCF_DEFER;
-			V_pfsync_defer_ptr = NULL;
-		}
-
-		if (sifp == NULL) {
-			if (sc->sc_sync_if)
-				if_rele(sc->sc_sync_if);
-			sc->sc_sync_if = NULL;
-			pfsync_multicast_cleanup(sc);
-			PFSYNC_UNLOCK(sc);
-			break;
-		}
-
-		for (c = 0; c < pfsync_buckets; c++) {
-			PFSYNC_BUCKET_LOCK(&sc->sc_buckets[c]);
-			if (sc->sc_buckets[c].b_len > PFSYNC_MINPKT &&
-			    (sifp->if_mtu < sc->sc_ifp->if_mtu ||
-				(sc->sc_sync_if != NULL &&
-				    sifp->if_mtu < sc->sc_sync_if->if_mtu) ||
-				sifp->if_mtu < MCLBYTES - sizeof(struct ip)))
-				pfsync_sendout(1, c);
-			PFSYNC_BUCKET_UNLOCK(&sc->sc_buckets[c]);
-		}
-
-		pfsync_multicast_cleanup(sc);
-
-		if (sc_sin->sin_addr.s_addr == htonl(INADDR_PFSYNC_GROUP)) {
-		    error = pfsync_multicast_setup(sc, sifp, imf);
-		    if (error) {
-			    if_rele(sifp);
-			    ip_mfilter_free(imf);
-			    PFSYNC_UNLOCK(sc);
-			    return (error);
-		    }
-		}
-		if (sc->sc_sync_if)
-		    if_rele(sc->sc_sync_if);
-		sc->sc_sync_if = sifp;
-
-		ip = &sc->sc_template.ipv4;
-		bzero(ip, sizeof(*ip));
-		ip->ip_v = IPVERSION;
-		ip->ip_hl = sizeof(sc->sc_template.ipv4) >> 2;
-		ip->ip_tos = IPTOS_LOWDELAY;
-		/* len and id are set later. */
-		ip->ip_off = htons(IP_DF);
-		ip->ip_ttl = PFSYNC_DFLTTL;
-		ip->ip_p = IPPROTO_PFSYNC;
-		ip->ip_src.s_addr = INADDR_ANY;
-		ip->ip_dst.s_addr = sc_sin->sin_addr.s_addr;
-
-		/* Request a full state table update. */
-		if ((sc->sc_flags & PFSYNCF_OK) && carp_demote_adj_p)
-		    (*carp_demote_adj_p)(V_pfsync_carp_adj,
-			"pfsync bulk start");
-		sc->sc_flags &= ~PFSYNCF_OK;
-		if (V_pf_status.debug >= PF_DEBUG_MISC)
-		    printf("pfsync: requesting bulk update\n");
-		PFSYNC_UNLOCK(sc);
-		PFSYNC_BUCKET_LOCK(&sc->sc_buckets[0]);
-		pfsync_request_update(0, 0);
-		PFSYNC_BUCKET_UNLOCK(&sc->sc_buckets[0]);
-		PFSYNC_BLOCK(sc);
-		sc->sc_ureq_sent = time_uptime;
-		callout_reset(&sc->sc_bulkfail_tmo, 5 * hz, pfsync_bulk_fail,
-		sc);
-		PFSYNC_BUNLOCK(sc);
-
-		break;
+		error = pfsync_kstatus_to_softc(&status, sc);
+		return (error);
 	    }
 	default:
 		return (ENOTTY);
@@ -2634,6 +2444,135 @@ pfsync_detach_ifnet(struct ifnet *ifp)
 	}
 
 	PFSYNC_UNLOCK(sc);
+}
+
+static int
+pfsync_pfsyncreq_to_kstatus(struct pfsyncreq *pfsyncr, struct pfsync_kstatus *status)
+{
+	struct sockaddr_storage sa;
+	status->maxupdates = pfsyncr->pfsyncr_maxupdates;
+	status->flags = pfsyncr->pfsyncr_defer;
+
+	strlcpy(status->syncdev, pfsyncr->pfsyncr_syncdev, IFNAMSIZ);
+
+	memset(&sa, 0, sizeof(sa));
+	if (pfsyncr->pfsyncr_syncpeer.s_addr != 0) {
+		struct sockaddr_in *in = (struct sockaddr_in *)&sa;
+		in->sin_family = AF_INET;
+		in->sin_len = sizeof(*in);
+		in->sin_addr.s_addr = pfsyncr->pfsyncr_syncpeer.s_addr;
+	}
+	status->syncpeer = sa;
+
+	return 0;
+}
+
+static int
+pfsync_kstatus_to_softc(struct pfsync_kstatus *status, struct pfsync_softc *sc)
+{
+	struct in_mfilter *imf = NULL;
+	struct ifnet *sifp;
+	struct ip *ip;
+	int error;
+	int c;
+
+	if ((status->maxupdates < 0) || (status->maxupdates > 255))
+		return (EINVAL);
+
+	if (status->syncdev[0] == '\0')
+		sifp = NULL;
+	else if ((sifp = ifunit_ref(status->syncdev)) == NULL)
+		return (EINVAL);
+
+	struct sockaddr_in *status_sin =
+	    (struct sockaddr_in *)&(status->syncpeer);
+	if (sifp != NULL && (status_sin->sin_addr.s_addr == 0 ||
+				status_sin->sin_addr.s_addr ==
+				    htonl(INADDR_PFSYNC_GROUP)))
+		imf = ip_mfilter_alloc(M_WAITOK, 0, 0);
+
+	PFSYNC_LOCK(sc);
+	struct sockaddr_in *sc_sin = (struct sockaddr_in *)&sc->sc_sync_peer;
+	sc_sin->sin_family = AF_INET;
+	sc_sin->sin_len = sizeof(*sc_sin);
+	if (status_sin->sin_addr.s_addr == 0) {
+		sc_sin->sin_addr.s_addr = htonl(INADDR_PFSYNC_GROUP);
+	} else {
+		sc_sin->sin_addr.s_addr = status_sin->sin_addr.s_addr;
+	}
+
+	sc->sc_maxupdates = status->maxupdates;
+	if (status->flags & PFSYNCF_DEFER) {
+		sc->sc_flags |= PFSYNCF_DEFER;
+		V_pfsync_defer_ptr = pfsync_defer;
+	} else {
+		sc->sc_flags &= ~PFSYNCF_DEFER;
+		V_pfsync_defer_ptr = NULL;
+	}
+
+	if (sifp == NULL) {
+		if (sc->sc_sync_if)
+			if_rele(sc->sc_sync_if);
+		sc->sc_sync_if = NULL;
+		pfsync_multicast_cleanup(sc);
+		PFSYNC_UNLOCK(sc);
+		return (0);
+	}
+
+	for (c = 0; c < pfsync_buckets; c++) {
+		PFSYNC_BUCKET_LOCK(&sc->sc_buckets[c]);
+		if (sc->sc_buckets[c].b_len > PFSYNC_MINPKT &&
+		    (sifp->if_mtu < sc->sc_ifp->if_mtu ||
+			(sc->sc_sync_if != NULL &&
+			    sifp->if_mtu < sc->sc_sync_if->if_mtu) ||
+			sifp->if_mtu < MCLBYTES - sizeof(struct ip)))
+			pfsync_sendout(1, c);
+		PFSYNC_BUCKET_UNLOCK(&sc->sc_buckets[c]);
+	}
+
+	pfsync_multicast_cleanup(sc);
+
+	if (sc_sin->sin_addr.s_addr == htonl(INADDR_PFSYNC_GROUP)) {
+		error = pfsync_multicast_setup(sc, sifp, imf);
+		if (error) {
+			if_rele(sifp);
+			ip_mfilter_free(imf);
+			PFSYNC_UNLOCK(sc);
+			return (error);
+		}
+	}
+	if (sc->sc_sync_if)
+		if_rele(sc->sc_sync_if);
+	sc->sc_sync_if = sifp;
+
+	ip = &sc->sc_template.ipv4;
+	bzero(ip, sizeof(*ip));
+	ip->ip_v = IPVERSION;
+	ip->ip_hl = sizeof(sc->sc_template.ipv4) >> 2;
+	ip->ip_tos = IPTOS_LOWDELAY;
+	/* len and id are set later. */
+	ip->ip_off = htons(IP_DF);
+	ip->ip_ttl = PFSYNC_DFLTTL;
+	ip->ip_p = IPPROTO_PFSYNC;
+	ip->ip_src.s_addr = INADDR_ANY;
+	ip->ip_dst.s_addr = sc_sin->sin_addr.s_addr;
+
+	/* Request a full state table update. */
+	if ((sc->sc_flags & PFSYNCF_OK) && carp_demote_adj_p)
+		(*carp_demote_adj_p)(V_pfsync_carp_adj,
+		    "pfsync bulk start");
+	sc->sc_flags &= ~PFSYNCF_OK;
+	if (V_pf_status.debug >= PF_DEBUG_MISC)
+		printf("pfsync: requesting bulk update\n");
+	PFSYNC_UNLOCK(sc);
+	PFSYNC_BUCKET_LOCK(&sc->sc_buckets[0]);
+	pfsync_request_update(0, 0);
+	PFSYNC_BUCKET_UNLOCK(&sc->sc_buckets[0]);
+	PFSYNC_BLOCK(sc);
+	sc->sc_ureq_sent = time_uptime;
+	callout_reset(&sc->sc_bulkfail_tmo, 5 * hz, pfsync_bulk_fail, sc);
+	PFSYNC_BUNLOCK(sc);
+	return (0);
 }
 
 static void
