@@ -323,39 +323,16 @@ setpfsync_defer(const char *val, int d, int s, const struct afswtch *rafp)
 	nvlist_destroy(nvl);
 }
 
-static void
-pfsync_nvstatus_to_kstatus(const nvlist_t *nvl, struct pfsync_kstatus *status)
-{
-	struct sockaddr_storage addr;
-	int ret;
-
-	memset((char *)status, 0, sizeof(struct pfsync_kstatus));
-
-	if (nvlist_exists_string(nvl, "syncdev"))
-		strlcpy(status->syncdev, nvlist_get_string(nvl, "syncdev"),
-		    IFNAMSIZ);
-	if (nvlist_exists_number(nvl, "maxupdates"))
-		status->maxupdates = nvlist_get_number(nvl, "maxupdates");
-	if (nvlist_exists_number(nvl, "flags"))
-		status->flags = nvlist_get_number(nvl, "flags");
-	if (nvlist_exists_nvlist(nvl, "syncpeer")) {
-		ret = pfsync_syncpeer_nvlist_to_sockaddr(nvlist_get_nvlist(nvl,
-							     "syncpeer"),
-		    &addr);
-		if (ret == 0)
-			status->syncpeer = addr;
-	}
-}
-
 void
 pfsync_status(int s)
 {
-	struct pfsync_kstatus status;
-	char syncpeer[NI_MAXHOST];
 	nvlist_t *nvl;
+	char syncdev[IFNAMSIZ];
+	char syncpeer_str[NI_MAXHOST];
+	struct sockaddr_storage syncpeer;
+	int maxupdates;
+	int flags;
 	int error;
-
-	memset((char *)&syncpeer, 0, NI_MAXHOST);
 
 	nvl = nvlist_create(0);
 
@@ -364,32 +341,44 @@ pfsync_status(int s)
 		return;
 	}
 
-	pfsync_nvstatus_to_kstatus(nvl, &status);
+	memset((char *)&syncdev, 0, IFNAMSIZ);
+	if (nvlist_exists_string(nvl, "syncdev"))
+		strlcpy(syncdev, nvlist_get_string(nvl, "syncdev"),
+		    IFNAMSIZ);
+	if (nvlist_exists_number(nvl, "maxupdates"))
+		maxupdates = nvlist_get_number(nvl, "maxupdates");
+	if (nvlist_exists_number(nvl, "flags"))
+		flags = nvlist_get_number(nvl, "flags");
+	if (nvlist_exists_nvlist(nvl, "syncpeer")) {
+		pfsync_syncpeer_nvlist_to_sockaddr(nvlist_get_nvlist(nvl,
+							     "syncpeer"),
+		    &syncpeer);
+	}
 
 	nvlist_destroy(nvl);
 
-	if (status.syncdev[0] != '\0' || status.syncpeer.ss_family != AF_UNSPEC)
+	if (syncdev[0] != '\0' || syncpeer.ss_family != AF_UNSPEC)
 		printf("\t");
 
-	if (status.syncdev[0] != '\0')
-		printf("syncdev: %s ", status.syncdev);
+	if (syncdev[0] != '\0')
+		printf("syncdev: %s ", syncdev);
 
-	if (status.syncpeer.ss_family == AF_INET &&
-	    ((struct sockaddr_in *)&(status.syncpeer))->sin_addr.s_addr !=
+	if (syncpeer.ss_family == AF_INET &&
+	    ((struct sockaddr_in *)&syncpeer)->sin_addr.s_addr !=
 		htonl(INADDR_PFSYNC_GROUP)) {
 
 		struct sockaddr *syncpeer_sa =
-		    (struct sockaddr *)&status.syncpeer;
+		    (struct sockaddr *)&syncpeer;
 		if ((error = getnameinfo(syncpeer_sa, syncpeer_sa->sa_len,
-			 syncpeer, sizeof(syncpeer), NULL, 0,
+			 syncpeer_str, sizeof(syncpeer_str), NULL, 0,
 			 NI_NUMERICHOST)) != 0)
 			errx(1, "getnameinfo: %s", gai_strerror(error));
-		printf("syncpeer: %s ", syncpeer);
+		printf("syncpeer: %s ", syncpeer_str);
 	}
 
-	printf("maxupd: %d ", status.maxupdates);
-	printf("defer: %s\n", (status.flags & PFSYNCF_DEFER) ? "on" : "off");
-	printf("\tsyncok: %d\n", (status.flags & PFSYNCF_OK) ? 1 : 0);
+	printf("maxupd: %d ", maxupdates);
+	printf("defer: %s\n", (flags & PFSYNCF_DEFER) ? "on" : "off");
+	printf("\tsyncok: %d\n", (flags & PFSYNCF_OK) ? 1 : 0);
 }
 
 static struct cmd pfsync_cmds[] = {
