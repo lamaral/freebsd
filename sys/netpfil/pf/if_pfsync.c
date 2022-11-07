@@ -1356,7 +1356,6 @@ pfsyncioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		ifp->if_mtu = ifr->ifr_mtu;
 		break;
 	case SIOCGETPFSYNC:
-		// XXX: Already changed to match the new softc struct
 		bzero(&pfsyncr, sizeof(pfsyncr));
 		PFSYNC_LOCK(sc);
 		if (sc->sc_sync_if) {
@@ -1388,12 +1387,9 @@ pfsyncioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		void *packed = NULL;
 		packed = nvlist_pack(nvl, &nvbuflen);
 		if (packed == NULL) {
-			error = nvlist_error(nvl);
-			if (error == 0)
-				error = EDOOFUS;
 			free(packed, M_NVLIST);
 			nvlist_destroy(nvl);
-			return error;
+			return (ENOMEM);
 		}
 
 		if (nvbuflen > ifr->ifr_cap_nv.buf_length) {
