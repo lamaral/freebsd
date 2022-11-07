@@ -123,6 +123,7 @@ pfsync_nvstatus_to_kstatus(const nvlist_t *nvl, struct pfsync_kstatus *status)
 {
 	struct sockaddr_storage addr;
 	int error;
+
 	if (!nvlist_exists_number(nvl, "maxupdates"))
 		return (EINVAL);
 	if (!nvlist_exists_number(nvl, "flags"))
@@ -137,13 +138,13 @@ pfsync_nvstatus_to_kstatus(const nvlist_t *nvl, struct pfsync_kstatus *status)
 
 	if (nvlist_exists_nvlist(nvl, "syncpeer")) {
 		memset(&addr, 0, sizeof(addr));
-		if ((error = pfsync_syncpeer_nvlist_to_sockaddr(nvlist_get_nvlist(nvl, "syncpeer"), &addr)) == 0)
-			status->syncpeer = addr;
-		else
-			return error;
+		if ((error = pfsync_syncpeer_nvlist_to_sockaddr(nvlist_get_nvlist(nvl, "syncpeer"), &addr)) != 0)
+			return (error);
+
+		status->syncpeer = addr;
 	} else {
 		memset(&status->syncpeer, 0, sizeof(status->syncpeer));
 	}
 
-	return 0;
+	return (0);
 }
