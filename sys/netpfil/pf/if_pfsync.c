@@ -2656,17 +2656,26 @@ pfsync_kstatus_to_softc(struct pfsync_kstatus *status, struct pfsync_softc *sc)
 		if_rele(sc->sc_sync_if);
 	sc->sc_sync_if = sifp;
 
-	ip = &sc->sc_template.ipv4;
-	bzero(ip, sizeof(*ip));
-	ip->ip_v = IPVERSION;
-	ip->ip_hl = sizeof(sc->sc_template.ipv4) >> 2;
-	ip->ip_tos = IPTOS_LOWDELAY;
-	/* len and id are set later. */
-	ip->ip_off = htons(IP_DF);
-	ip->ip_ttl = PFSYNC_DFLTTL;
-	ip->ip_p = IPPROTO_PFSYNC;
-	ip->ip_src.s_addr = INADDR_ANY;
-	ip->ip_dst.s_addr = sc_sin->sin_addr.s_addr;
+	switch (sc->sc_sync_peer.ss_family) {
+	case AF_INET: {
+		struct ip *ip;
+		ip = &sc->sc_template.ipv4;
+		bzero(ip, sizeof(*ip));
+		ip->ip_v = IPVERSION;
+		ip->ip_hl = sizeof(sc->sc_template.ipv4) >> 2;
+		ip->ip_tos = IPTOS_LOWDELAY;
+		/* len and id are set later. */
+		ip->ip_off = htons(IP_DF);
+		ip->ip_ttl = PFSYNC_DFLTTL;
+		ip->ip_p = IPPROTO_PFSYNC;
+		ip->ip_src.s_addr = INADDR_ANY;
+		ip->ip_dst = sc->sc_sync_peer.in4.sin_addr;
+		break;
+	}
+	case AF_INET6: {
+
+	}
+	}
 
 	/* Request a full state table update. */
 	if ((sc->sc_flags & PFSYNCF_OK) && carp_demote_adj_p)
