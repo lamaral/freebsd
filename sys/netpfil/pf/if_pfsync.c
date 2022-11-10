@@ -90,17 +90,21 @@ __FBSDID("$FreeBSD$");
 #include <net/if_types.h>
 #include <net/vnet.h>
 #include <net/pfvar.h>
+#include <net/route.h>
 #include <net/if_pfsync.h>
 
 #include <netinet/if_ether.h>
 #include <netinet/in.h>
 #include <netinet/in_var.h>
 #include <netinet/ip.h>
+#include <netinet/ip6.h>
 #include <netinet/ip_carp.h>
 #include <netinet/ip_var.h>
 #include <netinet/tcp.h>
 #include <netinet/tcp_fsm.h>
 #include <netinet/tcp_seq.h>
+
+#include <netinet6/ip6_var.h>
 
 #include <netpfil/pf/pfsync_nv.h>
 
@@ -108,6 +112,7 @@ struct pfsync_bucket;
 
 union inet_template {
 	struct ip      ipv4;
+	struct ip6_hdr ipv6;
 };
 
 #define PFSYNC_MINPKT ( \
@@ -213,6 +218,7 @@ struct pfsync_softc {
 	struct ifnet		*sc_ifp;
 	struct ifnet		*sc_sync_if;
 	struct ip_moptions	sc_imo;
+	struct ip6_moptions	sc_imo6;
 	struct sockaddr_storage	sc_sync_peer;
 	uint32_t		sc_flags;
 	uint8_t			sc_maxupdates;
@@ -732,6 +738,9 @@ done:
 }
 #endif
 
+#ifdef INET6
+
+#endif
 static int
 pfsync_in_clr(struct mbuf *m, int offset, int count, int flags)
 {
