@@ -743,13 +743,12 @@ static int
 pfsync6_input(struct mbuf **mp, int *offp __unused, int proto __unused)
 {
 	struct pfsync_softc *sc = V_pfsyncif;
-	struct pfsync_pkt pkt;
 	struct mbuf *m = *mp;
 	struct ip6_hdr *ip6 = mtod(m, struct ip6_hdr *);
 	struct pfsync_header *ph;
 	struct pfsync_subheader subh;
 
-	int offset, len;
+	int offset, len, flags = 0;
 	int rv;
 	uint16_t count;
 
@@ -812,7 +811,7 @@ pfsync6_input(struct mbuf **mp, int *offp __unused, int proto __unused)
 	 */
 	PF_RULES_RLOCK();
 	if (!bcmp(&ph->pfcksum, &V_pf_status.pf_chksum, PF_MD5_DIGEST_LENGTH))
-		pkt.flags |= PFSYNC_SI_CKSUM;
+		flags |= PFSYNC_SI_CKSUM;
 
 	offset += sizeof(*ph);
 	while (offset <= len - sizeof(subh)) {
@@ -827,7 +826,7 @@ pfsync6_input(struct mbuf **mp, int *offp __unused, int proto __unused)
 
 		count = ntohs(subh.count);
 		V_pfsyncstats.pfsyncs_iacts[subh.action] += count;
-		rv = (*pfsync_acts[subh.action])(&pkt, m, offset, count);
+		rv = (*pfsync_acts[subh.action])(m, offset, count, flags);
 		if (rv == -1) {
 			PF_RULES_RUNLOCK();
 			return (IPPROTO_DONE);
