@@ -2583,7 +2583,6 @@ pfsync_kstatus_to_softc(struct pfsync_kstatus *status, struct pfsync_softc *sc)
 {
 	struct in_mfilter *imf = NULL;
 	struct ifnet *sifp;
-	struct ip *ip;
 	int error;
 	int c;
 
@@ -2669,7 +2668,7 @@ pfsync_kstatus_to_softc(struct pfsync_kstatus *status, struct pfsync_softc *sc)
 		ip->ip_ttl = PFSYNC_DFLTTL;
 		ip->ip_p = IPPROTO_PFSYNC;
 		ip->ip_src.s_addr = INADDR_ANY;
-		ip->ip_dst = sc->sc_sync_peer.in4.sin_addr;
+		ip->ip_dst = ((struct sockaddr_in *)&sc->sc_sync_peer)->sin_addr;;
 		break;
 	}
 	case AF_INET6: {
