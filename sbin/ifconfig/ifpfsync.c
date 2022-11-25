@@ -361,7 +361,6 @@ pfsync_status(int s)
 	if (nvlist_exists_number(nvl, "flags"))
 		flags = nvlist_get_number(nvl, "flags");
 	if (nvlist_exists_nvlist(nvl, "syncpeer")) {
-		printf("syncpeer present in nvlist");
 		pfsync_syncpeer_nvlist_to_sockaddr(nvlist_get_nvlist(nvl,
 							     "syncpeer"),
 		    &syncpeer);

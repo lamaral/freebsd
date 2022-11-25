@@ -837,6 +837,7 @@ pfsync6_input(struct mbuf **mp, int *offp __unused, int proto __unused)
 	PF_RULES_RUNLOCK();
 
 done:
+	printf("pfsync: pfsync6_input is done\n");
 	m_freem(m);
 	return (IPPROTO_DONE);
 }
@@ -2496,6 +2497,7 @@ pfsyncintr(void *arg)
 #endif
 #ifdef INET6
 			case AF_INET6:
+				printf("pfsync: Inside pfsyncintr AF_INET6\n");
 				if (m->m_flags & M_SKIP_FIREWALL) {
 					error = ip6_output(m, NULL, NULL, 0,
 					    NULL, NULL, NULL);
