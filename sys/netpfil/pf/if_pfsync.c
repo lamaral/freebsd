@@ -2475,6 +2475,18 @@ pfsyncintr(void *arg)
 				}
 				break;
 #endif
+#ifdef INET6
+			case AF_INET6:
+				if (m->m_flags & M_SKIP_FIREWALL) {
+					error = ip6_output(m, NULL, NULL, 0,
+					    NULL, NULL, NULL);
+				} else {
+					error = ip6_output(m, NULL, NULL,
+					    IP_RAWOUTPUT, &sc->sc_imo6, NULL,
+					    NULL);
+				}
+				break;
+#endif
 			}
 
 			if (error == 0)
@@ -2522,6 +2534,7 @@ pfsync_multicast_setup(struct pfsync_softc *sc, struct ifnet *ifp,
 static void
 pfsync_multicast_cleanup(struct pfsync_softc *sc)
 {
+	/* TODO: Cleanup IPv6 as well here */
 	struct ip_moptions *imo = &sc->sc_imo;
 	struct in_mfilter *imf;
 
@@ -2580,9 +2593,9 @@ pfsync_pfsyncreq_to_kstatus(struct pfsyncreq *pfsyncr, struct pfsync_kstatus *st
 static int
 pfsync_kstatus_to_softc(struct pfsync_kstatus *status, struct pfsync_softc *sc)
 {
-	struct in_mfilter *imf = NULL;
+//	struct in_mfilter *imf = NULL;
 	struct ifnet *sifp;
-	int error;
+//	int error;
 	int c;
 
 	if ((status->maxupdates < 0) || (status->maxupdates > 255))
@@ -2593,21 +2606,41 @@ pfsync_kstatus_to_softc(struct pfsync_kstatus *status, struct pfsync_softc *sc)
 	else if ((sifp = ifunit_ref(status->syncdev)) == NULL)
 		return (EINVAL);
 
-	struct sockaddr_in *status_sin =
-	    (struct sockaddr_in *)&(status->syncpeer);
-	if (sifp != NULL && (status_sin->sin_addr.s_addr == 0 ||
-				status_sin->sin_addr.s_addr ==
-				    htonl(INADDR_PFSYNC_GROUP)))
-		imf = ip_mfilter_alloc(M_WAITOK, 0, 0);
+	switch (status->syncpeer.ss_family) {
+	case AF_UNSPEC:
+	case AF_INET: {
+		struct sockaddr_in *status_sin = (struct sockaddr_in *)&(status->syncpeer);
+		if (sifp != NULL && (status_sin->sin_addr.s_addr == 0 ||
+					status_sin->sin_addr.s_addr ==
+					    htonl(INADDR_PFSYNC_GROUP))) {
+			status_sin->sin_family = AF_INET;
+			status_sin->sin_len = sizeof(*status_sin);
+			status_sin->sin_addr.s_addr = htonl(INADDR_PFSYNC_GROUP);
+//			imf = ip_mfilter_alloc(M_WAITOK, 0, 0);
+		}
+		break;
+	}
+	}
+
 
 	PFSYNC_LOCK(sc);
-	struct sockaddr_in *sc_sin = (struct sockaddr_in *)&sc->sc_sync_peer;
-	sc_sin->sin_family = AF_INET;
-	sc_sin->sin_len = sizeof(*sc_sin);
-	if (status_sin->sin_addr.s_addr == 0) {
-		sc_sin->sin_addr.s_addr = htonl(INADDR_PFSYNC_GROUP);
-	} else {
-		sc_sin->sin_addr.s_addr = status_sin->sin_addr.s_addr;
+	switch (status->syncpeer.ss_family) {
+	case AF_INET: {
+		struct sockaddr_in *status_sin = (struct sockaddr_in *)&(status->syncpeer);
+		struct sockaddr_in *sc_sin = (struct sockaddr_in *)&sc->sc_sync_peer;
+		sc_sin->sin_family = AF_INET;
+		sc_sin->sin_len = sizeof(*sc_sin);
+		sc_sin->sin_addr = status_sin->sin_addr;
+		break;
+	}
+	case AF_INET6: {
+		struct sockaddr_in6 *status_sin = (struct sockaddr_in6 *)&(status->syncpeer);
+		struct sockaddr_in6 *sc_sin = (struct sockaddr_in6 *)&sc->sc_sync_peer;
+		sc_sin->sin6_family = AF_INET6;
+		sc_sin->sin6_len = sizeof(*sc_sin);
+		sc_sin->sin6_addr = status_sin->sin6_addr;
+		break;
+	}
 	}
 
 	sc->sc_maxupdates = status->maxupdates;
@@ -2641,15 +2674,15 @@ pfsync_kstatus_to_softc(struct pfsync_kstatus *status, struct pfsync_softc *sc)
 
 	pfsync_multicast_cleanup(sc);
 
-	if (sc_sin->sin_addr.s_addr == htonl(INADDR_PFSYNC_GROUP)) {
-		error = pfsync_multicast_setup(sc, sifp, imf);
-		if (error) {
-			if_rele(sifp);
-			ip_mfilter_free(imf);
-			PFSYNC_UNLOCK(sc);
-			return (error);
-		}
-	}
+//	if (sc_sin->sin_addr.s_addr == htonl(INADDR_PFSYNC_GROUP)) {
+//		error = pfsync_multicast_setup(sc, sifp, imf);
+//		if (error) {
+//			if_rele(sifp);
+//			ip_mfilter_free(imf);
+//			PFSYNC_UNLOCK(sc);
+//			return (error);
+//		}
+//	}
 	if (sc->sc_sync_if)
 		if_rele(sc->sc_sync_if);
 	sc->sc_sync_if = sifp;
@@ -2671,7 +2704,20 @@ pfsync_kstatus_to_softc(struct pfsync_kstatus *status, struct pfsync_softc *sc)
 		break;
 	}
 	case AF_INET6: {
+		struct ip6_hdr *ip6;
+		ip6 = &sc->sc_template.ipv6;
+		bzero(ip6, sizeof(*ip6));
+		ip6->ip6_vfc = IPV6_VERSION;
+		ip6->ip6_hlim = PFSYNC_DFLTTL;
+		ip6->ip6_nxt = IPPROTO_PFSYNC;
+		ip6->ip6_dst = ((struct sockaddr_in6 *)&sc->sc_sync_peer)->sin6_addr;
 
+		struct epoch_tracker et;
+		NET_EPOCH_ENTER(et);
+		in6_selectsrc_addr(RT_DEFAULT_FIB, &ip6->ip6_dst, 0,
+		    sc->sc_sync_if, &ip6->ip6_src, NULL);
+		NET_EPOCH_EXIT(et);
+		break;
 	}
 	}
 
