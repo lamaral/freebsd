@@ -54,7 +54,6 @@ void setpfsync_syncdev(const char *, int, int, const struct afswtch *);
 void unsetpfsync_syncdev(const char *, int, int, const struct afswtch *);
 void setpfsync_syncpeer(const char *, int, int, const struct afswtch *);
 void unsetpfsync_syncpeer(const char *, int, int, const struct afswtch *);
-void setpfsync_syncpeer(const char *, int, int, const struct afswtch *);
 void setpfsync_maxupd(const char *, int, int, const struct afswtch *);
 void setpfsync_defer(const char *, int, int, const struct afswtch *);
 void pfsync_status(int);
@@ -241,6 +240,18 @@ setpfsync_syncpeer(const char *val, int d, int s, const struct afswtch *rafp)
 		break;
 	}
 #endif
+#ifdef INET6
+	case AF_INET6: {
+		struct sockaddr_in6 *sin6 = (struct sockaddr_in6 *)
+					      peerres->ai_addr;
+
+		if (IN6_IS_ADDR_MULTICAST(&sin6->sin6_addr))
+			errx(1, "syncpeer address cannot be multicast");
+
+		memcpy(&addr, sin6, sizeof(*sin6));
+		break;
+	}
+#endif
 	default:
 		errx(1, "syncpeer address %s not supported", val);
 	}
@@ -363,9 +374,9 @@ pfsync_status(int s)
 	if (syncdev[0] != '\0')
 		printf("syncdev: %s ", syncdev);
 
-	if (syncpeer.ss_family == AF_INET &&
+	if ((syncpeer.ss_family == AF_INET &&
 	    ((struct sockaddr_in *)&syncpeer)->sin_addr.s_addr !=
-		htonl(INADDR_PFSYNC_GROUP)) {
+		htonl(INADDR_PFSYNC_GROUP)) || syncpeer.ss_family == AF_INET6) {
 
 		struct sockaddr *syncpeer_sa =
 		    (struct sockaddr *)&syncpeer;

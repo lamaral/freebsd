@@ -90,17 +90,21 @@ __FBSDID("$FreeBSD$");
 #include <net/if_types.h>
 #include <net/vnet.h>
 #include <net/pfvar.h>
+#include <net/route.h>
 #include <net/if_pfsync.h>
 
 #include <netinet/if_ether.h>
 #include <netinet/in.h>
 #include <netinet/in_var.h>
 #include <netinet/ip.h>
+#include <netinet/ip6.h>
 #include <netinet/ip_carp.h>
 #include <netinet/ip_var.h>
 #include <netinet/tcp.h>
 #include <netinet/tcp_fsm.h>
 #include <netinet/tcp_seq.h>
+
+#include <netinet6/ip6_var.h>
 
 #include <netpfil/pf/pfsync_nv.h>
 
@@ -108,6 +112,7 @@ struct pfsync_bucket;
 
 union inet_template {
 	struct ip      ipv4;
+	struct ip6_hdr ipv6;
 };
 
 #define PFSYNC_MINPKT ( \
@@ -213,6 +218,7 @@ struct pfsync_softc {
 	struct ifnet		*sc_ifp;
 	struct ifnet		*sc_sync_if;
 	struct ip_moptions	sc_imo;
+	struct ip6_moptions	sc_imo6;
 	struct sockaddr_storage	sc_sync_peer;
 	uint32_t		sc_flags;
 	uint8_t			sc_maxupdates;
@@ -727,6 +733,111 @@ pfsync_input(struct mbuf **mp, int *offp __unused, int proto __unused)
 	PF_RULES_RUNLOCK();
 
 done:
+	m_freem(m);
+	return (IPPROTO_DONE);
+}
+#endif
+
+#ifdef INET6
+static int
+pfsync6_input(struct mbuf **mp, int *offp __unused, int proto __unused)
+{
+	struct pfsync_softc *sc = V_pfsyncif;
+	struct mbuf *m = *mp;
+	struct ip6_hdr *ip6 = mtod(m, struct ip6_hdr *);
+	struct pfsync_header *ph;
+	struct pfsync_subheader subh;
+
+	int offset, len, flags = 0;
+	int rv;
+	uint16_t count;
+
+	printf("pfsync: Entered pfsync6_input\n");
+
+	PF_RULES_RLOCK_TRACKER;
+
+	*mp = NULL;
+	V_pfsyncstats.pfsyncs_ipackets++;
+
+	/* Verify that we have a sync interface configured. */
+	if (!sc || !sc->sc_sync_if || !V_pf_status.running ||
+	    (sc->sc_ifp->if_drv_flags & IFF_DRV_RUNNING) == 0)
+		goto done;
+
+	/* verify that the packet came in on the right interface */
+	if (sc->sc_sync_if != m->m_pkthdr.rcvif) {
+		V_pfsyncstats.pfsyncs_badif++;
+		goto done;
+	}
+
+	if_inc_counter(sc->sc_ifp, IFCOUNTER_IPACKETS, 1);
+	if_inc_counter(sc->sc_ifp, IFCOUNTER_IBYTES, m->m_pkthdr.len);
+	/* verify that the IP TTL is 255. */
+	if (ip6->ip6_hlim != PFSYNC_DFLTTL) {
+		V_pfsyncstats.pfsyncs_badttl++;
+		goto done;
+	}
+
+	offset = sizeof(*ip6);
+	if (m->m_pkthdr.len < offset + sizeof(*ph)) {
+		V_pfsyncstats.pfsyncs_hdrops++;
+		goto done;
+	}
+
+	if (offset + sizeof(*ph) > m->m_len) {
+		if (m_pullup(m, offset + sizeof(*ph)) == NULL) {
+			V_pfsyncstats.pfsyncs_hdrops++;
+			return (IPPROTO_DONE);
+		}
+		ip6 = mtod(m, struct ip6_hdr *);
+	}
+	ph = (struct pfsync_header *)((char *)ip6 + offset);
+
+	/* verify the version */
+	if (ph->version != PFSYNC_VERSION) {
+		V_pfsyncstats.pfsyncs_badver++;
+		goto done;
+	}
+
+	len = ntohs(ph->len) + offset;
+	if (m->m_pkthdr.len < len) {
+		V_pfsyncstats.pfsyncs_badlen++;
+		goto done;
+	}
+
+	/*
+	 * Trusting pf_chksum during packet processing, as well as seeking
+	 * in interface name tree, require holding PF_RULES_RLOCK().
+	 */
+	PF_RULES_RLOCK();
+	if (!bcmp(&ph->pfcksum, &V_pf_status.pf_chksum, PF_MD5_DIGEST_LENGTH))
+		flags |= PFSYNC_SI_CKSUM;
+
+	offset += sizeof(*ph);
+	while (offset <= len - sizeof(subh)) {
+		m_copydata(m, offset, sizeof(subh), (caddr_t)&subh);
+		offset += sizeof(subh);
+
+		if (subh.action >= PFSYNC_ACT_MAX) {
+			V_pfsyncstats.pfsyncs_badact++;
+			PF_RULES_RUNLOCK();
+			goto done;
+		}
+
+		count = ntohs(subh.count);
+		V_pfsyncstats.pfsyncs_iacts[subh.action] += count;
+		rv = (*pfsync_acts[subh.action])(m, offset, count, flags);
+		if (rv == -1) {
+			PF_RULES_RUNLOCK();
+			return (IPPROTO_DONE);
+		}
+
+		offset += rv;
+	}
+	PF_RULES_RUNLOCK();
+
+done:
+	printf("pfsync: pfsync6_input is done\n");
 	m_freem(m);
 	return (IPPROTO_DONE);
 }
@@ -1588,6 +1699,20 @@ pfsync_sendout(int schedswi, int c)
 		break;
 	    }
 #endif
+#ifdef INET6
+       case AF_INET6:
+	    {
+		printf("pfsync: AF_INET6 build the ip header %lu\n", sizeof(union inet_template));
+		struct ip6_hdr *ip6;
+
+		ip6 = mtod(m, struct ip6_hdr *);
+		bcopy(&sc->sc_template.ipv6, ip6, sizeof(*ip6));
+		aflen = offset = sizeof(*ip6);
+
+		ip6->ip6_plen = htons(m->m_pkthdr.len);
+		break;
+            }
+#endif
 	default:
 		m_freem(m);
 		return;
@@ -1837,6 +1962,11 @@ pfsync_defer_tmo(void *arg)
 	case AF_INET:
 		ip_output(m, NULL, NULL, 0, NULL, NULL);
 		break;
+#endif
+#ifdef INET6
+       case AF_INET6:
+               ip6_output(m, NULL, NULL, 0, NULL, NULL, NULL);
+               break;
 #endif
 	}
 
@@ -2365,6 +2495,19 @@ pfsyncintr(void *arg)
 				}
 				break;
 #endif
+#ifdef INET6
+			case AF_INET6:
+				printf("pfsync: Inside pfsyncintr AF_INET6\n");
+				if (m->m_flags & M_SKIP_FIREWALL) {
+					error = ip6_output(m, NULL, NULL, 0,
+					    NULL, NULL, NULL);
+				} else {
+					error = ip6_output(m, NULL, NULL,
+					    IP_RAWOUTPUT, &sc->sc_imo6, NULL,
+					    NULL);
+				}
+				break;
+#endif
 			}
 
 			if (error == 0)
@@ -2412,10 +2555,20 @@ pfsync_multicast_setup(struct pfsync_softc *sc, struct ifnet *ifp,
 static void
 pfsync_multicast_cleanup(struct pfsync_softc *sc)
 {
+	/* TODO: Cleanup IPv6 as well here */
 	struct ip_moptions *imo = &sc->sc_imo;
+	struct ip6_moptions *imo6 = &sc->sc_imo6;
 	struct in_mfilter *imf;
+	struct in6_mfilter *imf6;
 
 	while ((imf = ip_mfilter_first(&imo->imo_head)) != NULL) {
+		ip_mfilter_remove(&imo->imo_head, imf);
+		in_leavegroup(imf->imf_inm, NULL);
+		ip_mfilter_free(imf);
+	}
+	imo->imo_multicast_ifp = NULL;
+
+	while ((imf6 = ip_mfilter_first(&imo->imo_head)) != NULL) {
 		ip_mfilter_remove(&imo->imo_head, imf);
 		in_leavegroup(imf->imf_inm, NULL);
 		ip_mfilter_free(imf);
@@ -2470,10 +2623,9 @@ pfsync_pfsyncreq_to_kstatus(struct pfsyncreq *pfsyncr, struct pfsync_kstatus *st
 static int
 pfsync_kstatus_to_softc(struct pfsync_kstatus *status, struct pfsync_softc *sc)
 {
-	struct in_mfilter *imf = NULL;
+//	struct in_mfilter *imf = NULL;
 	struct ifnet *sifp;
-	struct ip *ip;
-	int error;
+//	int error;
 	int c;
 
 	if ((status->maxupdates < 0) || (status->maxupdates > 255))
@@ -2484,21 +2636,41 @@ pfsync_kstatus_to_softc(struct pfsync_kstatus *status, struct pfsync_softc *sc)
 	else if ((sifp = ifunit_ref(status->syncdev)) == NULL)
 		return (EINVAL);
 
-	struct sockaddr_in *status_sin =
-	    (struct sockaddr_in *)&(status->syncpeer);
-	if (sifp != NULL && (status_sin->sin_addr.s_addr == 0 ||
-				status_sin->sin_addr.s_addr ==
-				    htonl(INADDR_PFSYNC_GROUP)))
-		imf = ip_mfilter_alloc(M_WAITOK, 0, 0);
+	switch (status->syncpeer.ss_family) {
+	case AF_UNSPEC:
+	case AF_INET: {
+		struct sockaddr_in *status_sin = (struct sockaddr_in *)&(status->syncpeer);
+		if (sifp != NULL && (status_sin->sin_addr.s_addr == 0 ||
+					status_sin->sin_addr.s_addr ==
+					    htonl(INADDR_PFSYNC_GROUP))) {
+			status_sin->sin_family = AF_INET;
+			status_sin->sin_len = sizeof(*status_sin);
+			status_sin->sin_addr.s_addr = htonl(INADDR_PFSYNC_GROUP);
+//			imf = ip_mfilter_alloc(M_WAITOK, 0, 0);
+		}
+		break;
+	}
+	}
+
 
 	PFSYNC_LOCK(sc);
-	struct sockaddr_in *sc_sin = (struct sockaddr_in *)&sc->sc_sync_peer;
-	sc_sin->sin_family = AF_INET;
-	sc_sin->sin_len = sizeof(*sc_sin);
-	if (status_sin->sin_addr.s_addr == 0) {
-		sc_sin->sin_addr.s_addr = htonl(INADDR_PFSYNC_GROUP);
-	} else {
-		sc_sin->sin_addr.s_addr = status_sin->sin_addr.s_addr;
+	switch (status->syncpeer.ss_family) {
+	case AF_INET: {
+		struct sockaddr_in *status_sin = (struct sockaddr_in *)&(status->syncpeer);
+		struct sockaddr_in *sc_sin = (struct sockaddr_in *)&sc->sc_sync_peer;
+		sc_sin->sin_family = AF_INET;
+		sc_sin->sin_len = sizeof(*sc_sin);
+		sc_sin->sin_addr = status_sin->sin_addr;
+		break;
+	}
+	case AF_INET6: {
+		struct sockaddr_in6 *status_sin = (struct sockaddr_in6 *)&(status->syncpeer);
+		struct sockaddr_in6 *sc_sin = (struct sockaddr_in6 *)&sc->sc_sync_peer;
+		sc_sin->sin6_family = AF_INET6;
+		sc_sin->sin6_len = sizeof(*sc_sin);
+		sc_sin->sin6_addr = status_sin->sin6_addr;
+		break;
+	}
 	}
 
 	sc->sc_maxupdates = status->maxupdates;
@@ -2532,30 +2704,52 @@ pfsync_kstatus_to_softc(struct pfsync_kstatus *status, struct pfsync_softc *sc)
 
 	pfsync_multicast_cleanup(sc);
 
-	if (sc_sin->sin_addr.s_addr == htonl(INADDR_PFSYNC_GROUP)) {
-		error = pfsync_multicast_setup(sc, sifp, imf);
-		if (error) {
-			if_rele(sifp);
-			ip_mfilter_free(imf);
-			PFSYNC_UNLOCK(sc);
-			return (error);
-		}
-	}
+//	if (sc_sin->sin_addr.s_addr == htonl(INADDR_PFSYNC_GROUP)) {
+//		error = pfsync_multicast_setup(sc, sifp, imf);
+//		if (error) {
+//			if_rele(sifp);
+//			ip_mfilter_free(imf);
+//			PFSYNC_UNLOCK(sc);
+//			return (error);
+//		}
+//	}
 	if (sc->sc_sync_if)
 		if_rele(sc->sc_sync_if);
 	sc->sc_sync_if = sifp;
 
-	ip = &sc->sc_template.ipv4;
-	bzero(ip, sizeof(*ip));
-	ip->ip_v = IPVERSION;
-	ip->ip_hl = sizeof(sc->sc_template.ipv4) >> 2;
-	ip->ip_tos = IPTOS_LOWDELAY;
-	/* len and id are set later. */
-	ip->ip_off = htons(IP_DF);
-	ip->ip_ttl = PFSYNC_DFLTTL;
-	ip->ip_p = IPPROTO_PFSYNC;
-	ip->ip_src.s_addr = INADDR_ANY;
-	ip->ip_dst.s_addr = sc_sin->sin_addr.s_addr;
+	switch (sc->sc_sync_peer.ss_family) {
+	case AF_INET: {
+		struct ip *ip;
+		ip = &sc->sc_template.ipv4;
+		bzero(ip, sizeof(*ip));
+		ip->ip_v = IPVERSION;
+		ip->ip_hl = sizeof(sc->sc_template.ipv4) >> 2;
+		ip->ip_tos = IPTOS_LOWDELAY;
+		/* len and id are set later. */
+		ip->ip_off = htons(IP_DF);
+		ip->ip_ttl = PFSYNC_DFLTTL;
+		ip->ip_p = IPPROTO_PFSYNC;
+		ip->ip_src.s_addr = INADDR_ANY;
+		ip->ip_dst = ((struct sockaddr_in *)&sc->sc_sync_peer)->sin_addr;;
+		break;
+	}
+	case AF_INET6: {
+		struct ip6_hdr *ip6;
+		ip6 = &sc->sc_template.ipv6;
+		bzero(ip6, sizeof(*ip6));
+		ip6->ip6_vfc = IPV6_VERSION;
+		ip6->ip6_hlim = PFSYNC_DFLTTL;
+		ip6->ip6_nxt = IPPROTO_PFSYNC;
+		ip6->ip6_dst = ((struct sockaddr_in6 *)&sc->sc_sync_peer)->sin6_addr;
+
+		struct epoch_tracker et;
+		NET_EPOCH_ENTER(et);
+		in6_selectsrc_addr(RT_DEFAULT_FIB, &ip6->ip6_dst, 0,
+		    sc->sc_sync_if, &ip6->ip6_src, NULL);
+		NET_EPOCH_EXIT(et);
+		break;
+	}
+	}
 
 	/* Request a full state table update. */
 	if ((sc->sc_flags & PFSYNCF_OK) && carp_demote_adj_p)
@@ -2642,12 +2836,17 @@ VNET_SYSUNINIT(vnet_pfsync_uninit, SI_SUB_PROTO_FIREWALL, SI_ORDER_FOURTH,
 static int
 pfsync_init(void)
 {
-#ifdef INET
 	int error;
 
 	pfsync_detach_ifnet_ptr = pfsync_detach_ifnet;
 
+#ifdef INET
 	error = ipproto_register(IPPROTO_PFSYNC, pfsync_input, NULL);
+	if (error)
+		return (error);
+#endif
+#ifdef INET6
+	error = ip6proto_register(IPPROTO_PFSYNC, pfsync6_input, NULL);
 	if (error)
 		return (error);
 #endif
@@ -2662,6 +2861,9 @@ pfsync_uninit(void)
 
 #ifdef INET
 	ipproto_unregister(IPPROTO_PFSYNC);
+#endif
+#ifdef INET6
+	ip6proto_unregister(IPPROTO_PFSYNC);
 #endif
 }
 
