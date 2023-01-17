@@ -218,7 +218,6 @@ struct pfsync_softc {
 	struct ifnet		*sc_ifp;
 	struct ifnet		*sc_sync_if;
 	struct ip_moptions	sc_imo;
-	struct ip6_moptions	sc_imo6;
 	struct sockaddr_storage	sc_sync_peer;
 	uint32_t		sc_flags;
 	uint8_t			sc_maxupdates;
@@ -2502,8 +2501,9 @@ pfsyncintr(void *arg)
 					error = ip6_output(m, NULL, NULL, 0,
 					    NULL, NULL, NULL);
 				} else {
+					/* XXX: Used NULL instead of sc_imo6 as there is no IPv6 multicast implemented */
 					error = ip6_output(m, NULL, NULL,
-					    IP_RAWOUTPUT, &sc->sc_imo6, NULL,
+					    IP_RAWOUTPUT, NULL, NULL,
 					    NULL);
 				}
 				break;
@@ -2555,7 +2555,6 @@ pfsync_multicast_setup(struct pfsync_softc *sc, struct ifnet *ifp,
 static void
 pfsync_multicast_cleanup(struct pfsync_softc *sc)
 {
-	/* TODO: Cleanup IPv6 as well here */
 	struct ip_moptions *imo = &sc->sc_imo;
 	struct in_mfilter *imf;
 
@@ -2614,9 +2613,9 @@ pfsync_pfsyncreq_to_kstatus(struct pfsyncreq *pfsyncr, struct pfsync_kstatus *st
 static int
 pfsync_kstatus_to_softc(struct pfsync_kstatus *status, struct pfsync_softc *sc)
 {
-//	struct in_mfilter *imf = NULL;
+	struct in_mfilter *imf = NULL;
 	struct ifnet *sifp;
-//	int error;
+	int error;
 	int c;
 
 	if ((status->maxupdates < 0) || (status->maxupdates > 255))
@@ -2627,6 +2626,7 @@ pfsync_kstatus_to_softc(struct pfsync_kstatus *status, struct pfsync_softc *sc)
 	else if ((sifp = ifunit_ref(status->syncdev)) == NULL)
 		return (EINVAL);
 
+	/* XXX: Maybe move this block of code down? Might be impossible due to PFSYNC_LOCK(sc) and ip_mfilter_alloc */
 	switch (status->syncpeer.ss_family) {
 	case AF_UNSPEC:
 	case AF_INET: {
@@ -2637,12 +2637,11 @@ pfsync_kstatus_to_softc(struct pfsync_kstatus *status, struct pfsync_softc *sc)
 			status_sin->sin_family = AF_INET;
 			status_sin->sin_len = sizeof(*status_sin);
 			status_sin->sin_addr.s_addr = htonl(INADDR_PFSYNC_GROUP);
-//			imf = ip_mfilter_alloc(M_WAITOK, 0, 0);
+			imf = ip_mfilter_alloc(M_WAITOK, 0, 0);
 		}
 		break;
 	}
 	}
-
 
 	PFSYNC_LOCK(sc);
 	switch (status->syncpeer.ss_family) {
@@ -2695,15 +2694,15 @@ pfsync_kstatus_to_softc(struct pfsync_kstatus *status, struct pfsync_softc *sc)
 
 	pfsync_multicast_cleanup(sc);
 
-//	if (sc_sin->sin_addr.s_addr == htonl(INADDR_PFSYNC_GROUP)) {
-//		error = pfsync_multicast_setup(sc, sifp, imf);
-//		if (error) {
-//			if_rele(sifp);
-//			ip_mfilter_free(imf);
-//			PFSYNC_UNLOCK(sc);
-//			return (error);
-//		}
-//	}
+	if (sc_sin->sin_addr.s_addr == htonl(INADDR_PFSYNC_GROUP)) {
+		error = pfsync_multicast_setup(sc, sifp, imf);
+		if (error) {
+			if_rele(sifp);
+			ip_mfilter_free(imf);
+			PFSYNC_UNLOCK(sc);
+			return (error);
+		}
+	}
 	if (sc->sc_sync_if)
 		if_rele(sc->sc_sync_if);
 	sc->sc_sync_if = sifp;
