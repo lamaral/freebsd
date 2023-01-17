@@ -2557,9 +2557,18 @@ pfsync_multicast_cleanup(struct pfsync_softc *sc)
 {
 	/* TODO: Cleanup IPv6 as well here */
 	struct ip_moptions *imo = &sc->sc_imo;
+	struct ip6_moptions *imo6 = &sc->sc_imo6;
 	struct in_mfilter *imf;
+	struct in6_mfilter *imf6;
 
 	while ((imf = ip_mfilter_first(&imo->imo_head)) != NULL) {
+		ip_mfilter_remove(&imo->imo_head, imf);
+		in_leavegroup(imf->imf_inm, NULL);
+		ip_mfilter_free(imf);
+	}
+	imo->imo_multicast_ifp = NULL;
+
+	while ((imf6 = ip_mfilter_first(&imo->imo_head)) != NULL) {
 		ip_mfilter_remove(&imo->imo_head, imf);
 		in_leavegroup(imf->imf_inm, NULL);
 		ip_mfilter_free(imf);
