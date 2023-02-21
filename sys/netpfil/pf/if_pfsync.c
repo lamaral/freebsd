@@ -868,6 +868,10 @@ pfsync_process_input(sa_family_t af, struct mbuf **mp)
 		offset = sizeof(*ip);
 		break;
 	}
+	default: {
+		struct ip *ip = NULL;
+		panic("%s: invalid AF on packet", __func__);
+	}
 	}
 
 	PF_RULES_RLOCK_TRACKER;
@@ -2808,7 +2812,10 @@ pfsync_kstatus_to_softc(struct pfsync_kstatus *status, struct pfsync_softc *sc)
 
 	pfsync_multicast_cleanup(sc);
 
-	if (sc_sin->sin_addr.s_addr == htonl(INADDR_PFSYNC_GROUP)) {
+	if (
+	    (sc->sc_sync_peer.ss_family == AF_INET) &&
+	    (((struct sockaddr_in *)&sc->sc_sync_peer)->sin_addr.s_addr == htonl(INADDR_PFSYNC_GROUP))
+	) {
 		error = pfsync_multicast_setup(sc, sifp, imf);
 		if (error) {
 			if_rele(sifp);
