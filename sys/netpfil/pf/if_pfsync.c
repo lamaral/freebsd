@@ -863,14 +863,13 @@ pfsync_process_input(sa_family_t af, struct mbuf **mp)
 		break;
 	}
 	case AF_INET6: {
-		struct ip6_hdr *ip = mtod(m, struct ip6_hdr *);
-		ttl = ip->ip6_hlim;
-		offset = sizeof(*ip);
+		struct ip6_hdr *ip6 = mtod(m, struct ip6_hdr *);
+		ttl = ip6->ip6_hlim;
+		offset = sizeof(*ip6);
 		break;
 	}
 	default: {
-		struct ip *ip = NULL;
-		panic("%s: invalid AF on packet", __func__);
+		panic("%s: invalid AF on pfsync packet", __func__);
 	}
 	}
 
@@ -908,9 +907,19 @@ pfsync_process_input(sa_family_t af, struct mbuf **mp)
 			V_pfsyncstats.pfsyncs_hdrops++;
 			return (IPPROTO_DONE);
 		}
-		ip = mtod(m, typeof(ip));
+		switch (af) {
+		case AF_INET:
+			ip = mtod(m, struct ip *);
+		case AF_INET6:
+			ip6 = mtod(m, struct ip6_hdr *);
+		}
 	}
-	ph = (struct pfsync_header *)((char *)ip + offset);
+	switch (af) {
+	case AF_INET:
+		ph = (struct pfsync_header *)((char *)ip + offset);
+	case AF_INET6:
+		ph = (struct pfsync_header *)((char *)ip6 + offset);
+	}
 
 	/* verify the version */
 	if (ph->version != PFSYNC_VERSION) {
