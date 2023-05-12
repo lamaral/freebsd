@@ -765,6 +765,111 @@ done:
 }
 #endif
 
+#ifdef INET6
+static int
+pfsync6_input(struct mbuf **mp, int *offp __unused, int proto __unused)
+{
+	struct pfsync_softc *sc = V_pfsyncif;
+	struct mbuf *m = *mp;
+	struct ip6_hdr *ip6 = mtod(m, struct ip6_hdr *);
+	struct pfsync_header *ph;
+	struct pfsync_subheader subh;
+
+	int offset, len;
+	int rv;
+	uint16_t count;
+
+	printf("pfsync: Entered pfsync6_input\n");
+
+	PF_RULES_RLOCK_TRACKER;
+
+	*mp = NULL;
+	V_pfsyncstats.pfsyncs_ipackets++;
+
+	/* Verify that we have a sync interface configured. */
+	if (!sc || !sc->sc_sync_if || !V_pf_status.running ||
+	    (sc->sc_ifp->if_drv_flags & IFF_DRV_RUNNING) == 0)
+		goto done;
+
+	/* verify that the packet came in on the right interface */
+	if (sc->sc_sync_if != m->m_pkthdr.rcvif) {
+		V_pfsyncstats.pfsyncs_badif++;
+		goto done;
+	}
+
+	if_inc_counter(sc->sc_ifp, IFCOUNTER_IPACKETS, 1);
+	if_inc_counter(sc->sc_ifp, IFCOUNTER_IBYTES, m->m_pkthdr.len);
+	/* verify that the IP TTL is 255. */
+	if (ip6->ip6_hlim != PFSYNC_DFLTTL) {
+		V_pfsyncstats.pfsyncs_badttl++;
+		goto done;
+	}
+
+
+	offset = sizeof(*ip6);
+	if (m->m_pkthdr.len < offset + sizeof(*ph)) {
+		V_pfsyncstats.pfsyncs_hdrops++;
+		goto done;
+	}
+
+	if (offset + sizeof(*ph) > m->m_len) {
+		if (m_pullup(m, offset + sizeof(*ph)) == NULL) {
+			V_pfsyncstats.pfsyncs_hdrops++;
+			return (IPPROTO_DONE);
+		}
+		ip6 = mtod(m, struct ip6_hdr *);
+	}
+	ph = (struct pfsync_header *)((char *)ip6 + offset);
+
+	/* verify the version */
+	if (ph->version != PFSYNC_VERSION) {
+		V_pfsyncstats.pfsyncs_badver++;
+		goto done;
+	}
+
+	len = ntohs(ph->len) + offset;
+	if (m->m_pkthdr.len < len) {
+		V_pfsyncstats.pfsyncs_badlen++;
+		goto done;
+	}
+
+	/*
+	 * Trusting pf_chksum during packet processing, as well as seeking
+	 * in interface name tree, require holding PF_RULES_RLOCK().
+	 */
+	PF_RULES_RLOCK();
+	if (!bcmp(&ph->pfcksum, &V_pf_status.pf_chksum, PF_MD5_DIGEST_LENGTH))
+		flags |= PFSYNC_SI_CKSUM;
+
+	offset += sizeof(*ph);
+	while (offset <= len - sizeof(subh)) {
+		m_copydata(m, offset, sizeof(subh), (caddr_t)&subh);
+		offset += sizeof(subh);
+
+		if (subh.action >= PFSYNC_ACT_MAX) {
+			V_pfsyncstats.pfsyncs_badact++;
+			PF_RULES_RUNLOCK();
+			goto done;
+		}
+
+		count = ntohs(subh.count);
+		V_pfsyncstats.pfsyncs_iacts[subh.action] += count;
+		rv = (*pfsync_acts[subh.action])(m, offset, count, flags);
+		if (rv == -1) {
+			PF_RULES_RUNLOCK();
+			return (IPPROTO_DONE);
+		}
+
+		offset += rv;
+	}
+	PF_RULES_RUNLOCK();
+
+done:
+	m_freem(m);
+	return (IPPROTO_DONE);
+}
+#endif
+
 static int
 pfsync_in_clr(struct mbuf *m, int offset, int count, int flags)
 {
