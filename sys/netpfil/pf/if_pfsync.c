@@ -2642,7 +2642,6 @@ pfsync_kstatus_to_softc(struct pfsync_kstatus *status, struct pfsync_softc *sc)
 {
 	struct in_mfilter *imf = NULL;
 	struct ifnet *sifp;
-	struct ip *ip;
 	int error;
 	int c;
 
@@ -2715,17 +2714,39 @@ pfsync_kstatus_to_softc(struct pfsync_kstatus *status, struct pfsync_softc *sc)
 		if_rele(sc->sc_sync_if);
 	sc->sc_sync_if = sifp;
 
-	ip = &sc->sc_template.ipv4;
-	bzero(ip, sizeof(*ip));
-	ip->ip_v = IPVERSION;
-	ip->ip_hl = sizeof(sc->sc_template.ipv4) >> 2;
-	ip->ip_tos = IPTOS_LOWDELAY;
-	/* len and id are set later. */
-	ip->ip_off = htons(IP_DF);
-	ip->ip_ttl = PFSYNC_DFLTTL;
-	ip->ip_p = IPPROTO_PFSYNC;
-	ip->ip_src.s_addr = INADDR_ANY;
-	ip->ip_dst.s_addr = sc_sin->sin_addr.s_addr;
+	switch (sc->sc_sync_peer.ss_family) {
+	case AF_INET: {
+		struct ip *ip;
+		ip = &sc->sc_template.ipv4;
+		bzero(ip, sizeof(*ip));
+		ip->ip_v = IPVERSION;
+		ip->ip_hl = sizeof(sc->sc_template.ipv4) >> 2;
+		ip->ip_tos = IPTOS_LOWDELAY;
+		/* len and id are set later. */
+		ip->ip_off = htons(IP_DF);
+		ip->ip_ttl = PFSYNC_DFLTTL;
+		ip->ip_p = IPPROTO_PFSYNC;
+		ip->ip_src.s_addr = INADDR_ANY;
+		ip->ip_dst.s_addr = ((struct sockaddr_in *)&sc->sc_sync_peer)->sin_addr;
+		break;
+	}
+	case AF_INET6: {
+		struct ip6_hdr *ip6;
+		ip6 = &sc->sc_template.ipv6;
+		bzero(ip6, sizeof(*ip6));
+		ip6->ip6_vfc = IPV6_VERSION;
+		ip6->ip6_hlim = PFSYNC_DFLTTL;
+		ip6->ip6_nxt = IPPROTO_PFSYNC;
+		ip6->ip6_dst = ((struct sockaddr_in6 *)&sc->sc_sync_peer)->sin6_addr;
+
+		struct epoch_tracker et;
+		NET_EPOCH_ENTER(et);
+		in6_selectsrc_addr(RT_DEFAULT_FIB, &ip6->ip6_dst, 0,
+		    sc->sc_sync_if, &ip6->ip6_src, NULL);
+		NET_EPOCH_EXIT(et);
+		break;
+	}
+	}
 
 	/* Request a full state table update. */
 	if ((sc->sc_flags & PFSYNCF_OK) && carp_demote_adj_p)
