@@ -2651,21 +2651,40 @@ pfsync_kstatus_to_softc(struct pfsync_kstatus *status, struct pfsync_softc *sc)
 	else if ((sifp = ifunit_ref(status->syncdev)) == NULL)
 		return (EINVAL);
 
-	struct sockaddr_in *status_sin =
-	    (struct sockaddr_in *)&(status->syncpeer);
-	if (sifp != NULL && (status_sin->sin_addr.s_addr == 0 ||
-				status_sin->sin_addr.s_addr ==
-				    htonl(INADDR_PFSYNC_GROUP)))
-		imf = ip_mfilter_alloc(M_WAITOK, 0, 0);
+	switch (status->syncpeer.ss_family) {
+	case AF_UNSPEC:
+	case AF_INET: {
+		struct sockaddr_in *status_sin = (struct sockaddr_in *)&(status->syncpeer);
+		if (sifp != NULL && (status_sin->sin_addr.s_addr == 0 ||
+					status_sin->sin_addr.s_addr ==
+					    htonl(INADDR_PFSYNC_GROUP))) {
+			status_sin->sin_family = AF_INET;
+			status_sin->sin_len = sizeof(*status_sin);
+			status_sin->sin_addr.s_addr = htonl(INADDR_PFSYNC_GROUP);
+			imf = ip_mfilter_alloc(M_WAITOK, 0, 0);
+		}
+		break;
+	}
+	}
 
 	PFSYNC_LOCK(sc);
-	struct sockaddr_in *sc_sin = (struct sockaddr_in *)&sc->sc_sync_peer;
-	sc_sin->sin_family = AF_INET;
-	sc_sin->sin_len = sizeof(*sc_sin);
-	if (status_sin->sin_addr.s_addr == 0) {
-		sc_sin->sin_addr.s_addr = htonl(INADDR_PFSYNC_GROUP);
-	} else {
-		sc_sin->sin_addr.s_addr = status_sin->sin_addr.s_addr;
+	switch (status->syncpeer.ss_family) {
+	case AF_INET: {
+		struct sockaddr_in *status_sin = (struct sockaddr_in *)&(status->syncpeer);
+		struct sockaddr_in *sc_sin = (struct sockaddr_in *)&sc->sc_sync_peer;
+		sc_sin->sin_family = AF_INET;
+		sc_sin->sin_len = sizeof(*sc_sin);
+		sc_sin->sin_addr = status_sin->sin_addr;
+		break;
+	}
+	case AF_INET6: {
+		struct sockaddr_in6 *status_sin = (struct sockaddr_in6 *)&(status->syncpeer);
+		struct sockaddr_in6 *sc_sin = (struct sockaddr_in6 *)&sc->sc_sync_peer;
+		sc_sin->sin6_family = AF_INET6;
+		sc_sin->sin6_len = sizeof(*sc_sin);
+		sc_sin->sin6_addr = status_sin->sin6_addr;
+		break;
+	}
 	}
 
 	sc->sc_maxupdates = status->maxupdates;
