@@ -1726,6 +1726,20 @@ pfsync_sendout(int schedswi, int c)
 		break;
 	    }
 #endif
+#ifdef INET6
+	case AF_INET6:
+		{
+		printf("pfsync: AF_INET6 build the ip header %lu\n", sizeof(union inet_template));
+		struct ip6_hdr *ip6;
+
+		ip6 = mtod(m, struct ip6_hdr *);
+		bcopy(&sc->sc_template.ipv6, ip6, sizeof(*ip6));
+		aflen = offset = sizeof(*ip6);
+
+		ip6->ip6_plen = htons(m->m_pkthdr.len);
+		break;
+		}
+#endif
 	default:
 		m_freem(m);
 		return;
