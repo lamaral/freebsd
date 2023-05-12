@@ -91,12 +91,14 @@ __FBSDID("$FreeBSD$");
 #include <net/if_types.h>
 #include <net/vnet.h>
 #include <net/pfvar.h>
+#include <net/route.h>
 #include <net/if_pfsync.h>
 
 #include <netinet/if_ether.h>
 #include <netinet/in.h>
 #include <netinet/in_var.h>
 #include <netinet/ip.h>
+#include <netinet/ip6.h>
 #include <netinet/ip_carp.h>
 #include <netinet/ip_var.h>
 #include <netinet/tcp.h>
@@ -112,7 +114,8 @@ struct pfsync_bucket;
 struct pfsync_softc;
 
 union inet_template {
-	struct ip      ipv4;
+	struct ip	ipv4;
+	struct ip6_hdr	ipv6;
 };
 
 #define PFSYNC_MINPKT ( \
