@@ -2833,12 +2833,17 @@ VNET_SYSUNINIT(vnet_pfsync_uninit, SI_SUB_PROTO_FIREWALL, SI_ORDER_FOURTH,
 static int
 pfsync_init(void)
 {
-#ifdef INET
 	int error;
 
 	pfsync_detach_ifnet_ptr = pfsync_detach_ifnet;
 
+#ifdef INET
 	error = ipproto_register(IPPROTO_PFSYNC, pfsync_input, NULL);
+	if (error)
+		return (error);
+#endif
+#ifdef INET6
+	error = ip6proto_register(IPPROTO_PFSYNC, pfsync6_input, NULL);
 	if (error)
 		return (error);
 #endif
@@ -2853,6 +2858,9 @@ pfsync_uninit(void)
 
 #ifdef INET
 	ipproto_unregister(IPPROTO_PFSYNC);
+#endif
+#ifdef INET6
+	ip6proto_unregister(IPPROTO_PFSYNC);
 #endif
 }
 
