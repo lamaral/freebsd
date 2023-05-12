@@ -2497,10 +2497,8 @@ pfsync_tx(struct pfsync_softc *sc, struct mbuf *m)
 			error = ip6_output(m, NULL, NULL, 0,
 			    NULL, NULL, NULL);
 		} else {
-			MPASS(false);
-			/* We don't support pfsync over IPv6. */
-			/*error = ip6_output(m, NULL, NULL,
-			    IP_RAWOUTPUT, &sc->sc_imo6, NULL);*/
+			error = ip6_output(m, NULL, NULL,
+			    IP_RAWOUTPUT, NULL, NULL);
 		}
 		break;
 #endif
