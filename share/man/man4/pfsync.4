@@ -90,7 +90,7 @@ interface:
 .Ed
 .Pp
 By default, state change messages are sent out on the synchronisation
-interface using IP multicast packets to the 224.0.0.240 group address.
+interface using IPv4 multicast packets to the 224.0.0.240 group address.
 An alternative destination address for
 .Nm
 packets can be specified using the
@@ -114,6 +114,14 @@ Either run the pfsync protocol on a trusted network \- ideally a network
 dedicated to pfsync messages such as a crossover cable between two firewalls,
 or specify a peer address and protect the traffic with
 .Xr ipsec 4 .
+.Pp
+The state change messages can also be sent to a peer using IPv6. An IPv6
+address can be specified using the
+.Ic syncpeer
+keyword. The command supports Global Unicast and Link-Local addresses, e.g.:
+.Bd -literal -offset indent
+# ifconfig pfsync0 syncpeer fe80:1::1%vtnet0 syncdev vtnet0
+.Ed
 .Pp
 .Nm
 has the following
