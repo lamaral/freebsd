@@ -779,8 +779,6 @@ pfsync6_input(struct mbuf **mp, int *offp __unused, int proto __unused)
 	int rv;
 	uint16_t count;
 
-	printf("pfsync: Entered pfsync6_input\n");
-
 	PF_RULES_RLOCK_TRACKER;
 
 	*mp = NULL;
@@ -1729,7 +1727,6 @@ pfsync_sendout(int schedswi, int c)
 #ifdef INET6
 	case AF_INET6:
 		{
-		printf("pfsync: AF_INET6 build the ip header %lu\n", sizeof(union inet_template));
 		struct ip6_hdr *ip6;
 
 		ip6 = mtod(m, struct ip6_hdr *);
