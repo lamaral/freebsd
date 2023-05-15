@@ -2511,6 +2511,8 @@ pfsync_tx(struct pfsync_softc *sc, struct mbuf *m)
 			error = ip6_output(m, NULL, NULL, 0,
 			    NULL, NULL, NULL);
 		} else {
+			/* XXX: the moptions for IPv6 is left as NULL, as
+			 * multicast IPv6 support is not handled here */
 			error = ip6_output(m, NULL, NULL,
 			    IP_RAWOUTPUT, NULL, NULL, NULL);
 		}
@@ -2877,6 +2879,8 @@ pfsync_init(void)
 	if (error)
 		return (error);
 #endif
+	/* XXX: What if the register function below errors out? Should we
+	 * somehow cleanup the above registration? */
 #ifdef INET6
 	error = ip6proto_register(IPPROTO_PFSYNC, pfsync6_input, NULL);
 	if (error)
