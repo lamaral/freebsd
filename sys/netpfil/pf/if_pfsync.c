@@ -775,7 +775,7 @@ pfsync6_input(struct mbuf **mp, int *offp __unused, int proto __unused)
 	struct pfsync_header *ph;
 	struct pfsync_subheader subh;
 
-	int offset, len;
+	int offset, len, flags = 0;
 	int rv;
 	uint16_t count;
 
@@ -839,7 +839,7 @@ pfsync6_input(struct mbuf **mp, int *offp __unused, int proto __unused)
 	 */
 	PF_RULES_RLOCK();
 	if (!bcmp(&ph->pfcksum, &V_pf_status.pf_chksum, PF_MD5_DIGEST_LENGTH))
-		flags |= PFSYNC_SI_CKSUM;
+		flags = PFSYNC_SI_CKSUM;
 
 	offset += sizeof(*ph);
 	while (offset <= len - sizeof(subh)) {
@@ -2512,7 +2512,7 @@ pfsync_tx(struct pfsync_softc *sc, struct mbuf *m)
 			    NULL, NULL, NULL);
 		} else {
 			error = ip6_output(m, NULL, NULL,
-			    IP_RAWOUTPUT, NULL, NULL);
+			    IP_RAWOUTPUT, NULL, NULL, NULL);
 		}
 		break;
 #endif
@@ -2732,7 +2732,11 @@ pfsync_kstatus_to_softc(struct pfsync_kstatus *status, struct pfsync_softc *sc)
 
 	pfsync_multicast_cleanup(sc);
 
-	if (sc_sin->sin_addr.s_addr == htonl(INADDR_PFSYNC_GROUP)) {
+	if (
+	    (sc->sc_sync_peer.ss_family == AF_INET) &&
+	    (((struct sockaddr_in *)&sc->sc_sync_peer)->sin_addr.s_addr ==
+		htonl(INADDR_PFSYNC_GROUP))
+	) {
 		error = pfsync_multicast_setup(sc, sifp, imf);
 		if (error) {
 			if_rele(sifp);
@@ -2758,7 +2762,7 @@ pfsync_kstatus_to_softc(struct pfsync_kstatus *status, struct pfsync_softc *sc)
 		ip->ip_ttl = PFSYNC_DFLTTL;
 		ip->ip_p = IPPROTO_PFSYNC;
 		ip->ip_src.s_addr = INADDR_ANY;
-		ip->ip_dst.s_addr = ((struct sockaddr_in *)&sc->sc_sync_peer)->sin_addr;
+		ip->ip_dst = ((struct sockaddr_in *)&sc->sc_sync_peer)->sin_addr;
 		break;
 	}
 	case AF_INET6: {
