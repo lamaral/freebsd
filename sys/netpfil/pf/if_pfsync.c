@@ -2778,7 +2778,7 @@ pfsync_kstatus_to_softc(struct pfsync_kstatus *status, struct pfsync_softc *sc)
 
 		struct epoch_tracker et;
 		NET_EPOCH_ENTER(et);
-		in6_selectsrc_addr(RT_DEFAULT_FIB, &ip6->ip6_dst, 0,
+		in6_selectsrc_addr(if_getfib(sc->sc_sync_if), &ip6->ip6_dst, 0,
 		    sc->sc_sync_if, &ip6->ip6_src, NULL);
 		NET_EPOCH_EXIT(et);
 		break;
