@@ -216,9 +216,11 @@ again:
 		}
 		break;
 
+#ifdef HAVE_NET_IF_PFLOG_H
 	case IPPROTO_PFSYNC:
 		pfsync_ip_print(ndo, bp, length);
 		break;
+#endif
 
 	case IPPROTO_NONE:
 		ND_PRINT("no next header");
