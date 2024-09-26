@@ -1134,6 +1134,8 @@ nhop_print_buf(const struct nhop_object *nh, char *buf, size_t bufsize)
 {
 #if defined(INET) || defined(INET6)
 	char abuf[INET6_ADDRSTRLEN];
+	char sbuf[INET6_ADDRSTRLEN];
+	struct sockaddr_in6 *in;
 #endif
 	struct nhop_priv *nh_priv = nh->nh_priv;
 	const char *upper_str = rib_print_family(nh->nh_priv->nh_upper_family);
@@ -1148,9 +1150,11 @@ nhop_print_buf(const struct nhop_object *nh, char *buf, size_t bufsize)
 #endif
 #ifdef INET6
 	case AF_INET6:
+		in = (struct sockaddr_in6 *)nh->nh_ifa->ifa_addr;
 		inet_ntop(AF_INET6, &nh->gw6_sa.sin6_addr, abuf, sizeof(abuf));
-		snprintf(buf, bufsize, "nh#%d/%s/%s/%s", nh_priv->nh_idx, upper_str,
-		    if_name(nh->nh_ifp), abuf);
+		inet_ntop(AF_INET6, &in->sin6_addr, sbuf, sizeof(sbuf));
+		snprintf(buf, bufsize, "nh#%d/%s/%s/%s/%s", nh_priv->nh_idx, upper_str,
+		    if_name(nh->nh_ifp), abuf, sbuf);
 		break;
 #endif
 	case AF_LINK:

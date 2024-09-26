@@ -703,20 +703,24 @@ finalize_nhop(struct nhop_object *nh, const struct sockaddr *dst, int *perror)
 	 *  nh_ifp, nh_ifa, nh_gw
 	 */
 	if (nh->gw_sa.sa_family == 0) {
+		NL_LOG(LOG_DEBUG, "nh->gw_sa.sa_family == 0");
 		/*
 		 * Empty gateway. Can be direct route with RTA_OIF set.
 		 */
-		if (nh->nh_ifp != NULL)
+		if (nh->nh_ifp != NULL) {
+			NL_LOG(LOG_DEBUG, "Empty gateway. Can be direct route with RTA_OIF set");
 			nhop_set_direct_gw(nh, nh->nh_ifp);
-		else {
+		} else {
 			NL_LOG(LOG_DEBUG, "empty gateway and interface, skipping");
 			*perror = EINVAL;
 			return (NULL);
 		}
 		/* Both nh_ifp and gateway are set */
 	} else {
+		NL_LOG(LOG_DEBUG, "Both nh_ifp and gateway are set");
 		/* Gateway is set up, we can derive ifp if not set */
 		if (nh->nh_ifp == NULL) {
+			NL_LOG(LOG_DEBUG, "Gateway is set up, we can derive ifp if not set");
 			uint32_t fibnum = nhop_get_fibnum(nh);
 			uint32_t flags = 0;
 
@@ -736,9 +740,11 @@ finalize_nhop(struct nhop_object *nh, const struct sockaddr *dst, int *perror)
 	}
 	/* Both nh_ifp and gateway are set */
 	if (nh->nh_ifa == NULL) {
+		NL_LOG(LOG_DEBUG, "Both nh_ifp and gateway are set");
 		const struct sockaddr *gw_sa = &nh->gw_sa;
 
 		if (gw_sa->sa_family != dst->sa_family) {
+			NL_LOG(LOG_DEBUG, "gw_sa family different than dst");
 			/*
 			 * Use dst as the target for determining the default
 			 * preferred ifa IF
@@ -751,6 +757,7 @@ finalize_nhop(struct nhop_object *nh, const struct sockaddr *dst, int *perror)
 		struct ifaddr *ifa = ifaof_ifpforaddr(gw_sa, nh->nh_ifp);
 		if (ifa == NULL) {
 			/* Try link-level ifa. */
+			NL_LOG(LOG_DEBUG, "Try link-level ifa");
 			gw_sa = &nh->gw_sa;
 			ifa = ifaof_ifpforaddr(gw_sa, nh->nh_ifp);
 			if (ifa == NULL) {
