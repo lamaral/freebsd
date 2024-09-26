@@ -34,6 +34,9 @@
 #include <sys/malloc.h>
 #include <sys/rmlock.h>
 #include <sys/socket.h>
+#include <sys/param.h>
+#include <sys/queue.h>
+#include <sys/sdt.h>
 
 #include <net/if.h>
 #include <net/route.h>
@@ -50,6 +53,10 @@
 #define	DEBUG_MAX_LEVEL	LOG_DEBUG3
 #include <netlink/netlink_debug.h>
 _DECLARE_DEBUG(LOG_INFO);
+
+SDT_PROVIDER_DEFINE(netlink);
+SDT_PROBE_DEFINE1(netlink, route, finalize_nhop, ifa, "struct ifaddr *");
+SDT_PROBE_DEFINE2(netlink, route, finalize_nhop, done, "struct nhop_object *", "int");
 
 static unsigned char
 get_rtm_type(const struct nhop_object *nh)
@@ -760,15 +767,17 @@ finalize_nhop(struct nhop_object *nh, const struct sockaddr *dst, int *perror)
 			NL_LOG(LOG_DEBUG, "Try link-level ifa");
 			gw_sa = &nh->gw_sa;
 			ifa = ifaof_ifpforaddr(gw_sa, nh->nh_ifp);
+
 			if (ifa == NULL) {
 				NL_LOG(LOG_DEBUG, "Unable to determine ifa, skipping");
 				*perror = EINVAL;
 				return (NULL);
 			}
 		}
+		SDT_PROBE1(netlink, route, finalize_nhop, ifa, ifa);
 		nhop_set_src(nh, ifa);
 	}
-
+	SDT_PROBE2(netlink, route, finalize_nhop, done, nh, perror);
 	return (nhop_get_nhop(nh, perror));
 }
 
