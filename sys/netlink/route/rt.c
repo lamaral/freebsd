@@ -468,6 +468,7 @@ nlattr_get_multipath(struct nlattr *nla, struct nl_pstate *npt, const void *arg,
 struct nl_parsed_route {
 	struct sockaddr		*rta_dst;
 	struct sockaddr		*rta_gw;
+	struct sockaddr		*rta_prefsrc;
 	struct ifnet		*rta_oif;
 	struct rta_mpath	*rta_multipath;
 	uint32_t		rta_table;
@@ -494,6 +495,7 @@ static const struct nlattr_parser nla_p_rtmsg[] = {
 	{ .type = NL_RTA_DST, .off = _OUT(rta_dst), .cb = nlattr_get_ip },
 	{ .type = NL_RTA_OIF, .off = _OUT(rta_oif), .cb = nlattr_get_ifp },
 	{ .type = NL_RTA_GATEWAY, .off = _OUT(rta_gw), .cb = nlattr_get_ip },
+	{ .type = NL_RTA_PREFSRC, .off = _OUT(rta_prefsrc), .cb = nlattr_get_ip },
 	{ .type = NL_RTA_METRICS, .arg = &metrics_parser, .cb = nlattr_get_nested },
 	{ .type = NL_RTA_MULTIPATH, .off = _OUT(rta_multipath), .cb = nlattr_get_multipath },
 	{ .type = NL_RTA_WEIGHT, .off = _OUT(rta_weight), .cb = nlattr_get_uint32 },
@@ -826,6 +828,15 @@ create_nexthop_one(struct nl_parsed_route *attrs, struct rta_mpath_nh *mpnh,
 	if (attrs->rtm_protocol > RTPROT_STATIC)
 		nhop_set_origin(nh, attrs->rtm_protocol);
 
+	if (attrs->rta_prefsrc != NULL) {
+		struct ifaddr *ifa = ifa_ifwithaddr(attrs->rta_prefsrc);
+		if (ifa == NULL) {
+			nhop_free(nh);
+			return (EINVAL);
+		}
+		nhop_set_src(nh, ifa);
+	}
+
 	*pnh = finalize_nhop(nh, attrs->rta_dst, &error);
 
 	return (error);
@@ -914,6 +925,15 @@ create_nexthop_from_attrs(struct nl_parsed_route *attrs,
 		/* TODO: return ENOTSUP for other types if strict option is set */
 		}
 
+		if (attrs->rta_prefsrc != NULL) {
+			struct ifaddr *ifa = ifa_ifwithaddr(attrs->rta_prefsrc);
+			if (ifa == NULL) {
+				*perror = EINVAL;
+				return (NULL);
+			}
+			nhop_set_src(nh, ifa);
+		}
+
 		nh = finalize_nhop(nh, attrs->rta_dst, perror);
 	}
 
@@ -944,6 +964,11 @@ rtnl_handle_newroute(struct nlmsghdr *hdr, struct nlpcb *nlp,
 		attrs.rta_table = attrs.rtm_table;
 	} else if (attrs.rta_table >= V_rt_numfibs) {
 		NLMSG_REPORT_ERR_MSG(npt, "invalid fib");
+		return (EINVAL);
+	}
+
+	if (attrs.rta_prefsrc != NULL && ifa_ifwithaddr(attrs.rta_prefsrc) == NULL) {
+		NLMSG_REPORT_ERR_MSG(npt, "RTA_PREFSRC is not valid");
 		return (EINVAL);
 	}
 
